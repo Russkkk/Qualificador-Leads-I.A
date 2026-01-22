@@ -8,6 +8,20 @@ from sklearn.metrics import accuracy_score
 app = Flask(__name__)
 ARQUIVO = "leads.csv"
 
+
+# ===============================
+# Whatsapp link 
+# ===============================
+WHATSAPP_NUMERO = "+55 18 98162-1797"  # troque pelo seu número
+def gerar_link_whatsapp(probabilidade):
+    mensagem = (
+        f"Olá! Vi seu interesse e posso te ajudar agora 😊\n\n"
+        f"Atendimento prioritário disponível."
+    )
+
+    texto = mensagem.replace(" ", "%20").replace("\n", "%0A")
+    return f"https://wa.me/{WHATSAPP_NUMERO}?text={texto}"
+
 # ===============================
 # CARREGAR OU CRIAR DADOS
 # ===============================
@@ -75,10 +89,15 @@ def prever():
     df = pd.concat([df, novo], ignore_index=True)
     df.to_csv(ARQUIVO, index=False)
 
-    return jsonify({
-        "probabilidade_de_compra": round(prob, 2),
-        "lead_quente": decisao
-    })
+    resposta = {
+    "probabilidade_de_compra": round(prob, 2),
+    "lead_quente": decisao
+}
+
+if decisao == 1:
+    resposta["whatsapp"] = gerar_link_whatsapp(prob)
+
+return jsonify(resposta)
 
 # ===============================
 # ROTA DE FEEDBACK REAL
