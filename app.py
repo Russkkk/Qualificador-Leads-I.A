@@ -1,36 +1,97 @@
-from flask import Flask, request, jsonify
+import os
 import pandas as pd
+from flask import Flask, request, jsonify
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
 app = Flask(__name__)
 
-# ===== TREINANDO A IA =====
-dados = {
-    'tempo_site': [1,2,5,8,10,15,20,25],
-    'paginas_visitadas': [1,1,2,3,4,5,6,7],
-    'clicou_preco': [0,0,0,1,1,1,1,1],
-    'lead_quente': [0,0,0,1,1,1,1,1]
-}
+ARQUIVO = "leads.csv"
 
-df = pd.DataFrame(dados)
+# ===============================
+# CARREGAR OU CRIAR DADOS
+# ===============================
+if os.path.exists(ARQUIVO):
+    df = pd.read_csv(ARQUIVO)
+else:
+    df = pd.DataFrame(columns=[
+        'tempo_site',
+        'paginas_visitadas',
+        'clicou_preco',
+        'virou_cliente'
+    ])
 
-X = df[['tempo_site', 'paginas_visitadas', 'clicou_preco']]
-y = df['lead_quente']
+# ===============================
+# TREINAR MODELO
+# ===============================
+def treinar_modelo():
+    if len(df) < 5:
+        return None, None
 
-modelo = DecisionTreeClassifier()
-modelo.fit(X, y)
+    X = df[['tempo_site', 'paginas_visitadas', 'clicou_preco']]
+    y = df['virou_cliente']
 
-# ===== ROTA DA API =====
+    X_treino, X_teste, y_treino, y_teste = train_test_split(
+        X, y, test_size=0.3, random_state=42
+    )
+
+    modelo = DecisionTreeClassifier(max_depth=4)
+    modelo.fit(X_treino, y_treino)
+
+    previsoes = modelo.predict(X_teste)
+    acc = accuracy_score(y_teste, previsoes)
+
+    return modelo, round(acc, 2)
+
+modelo, acuracia = treinar_modelo()
+
+# ===============================
+# ROTA DE PREVISÃO
+# ===============================
 @app.route('/prever', methods=['POST'])
 def prever():
-    data = request.json
-    entrada = pd.DataFrame([data])
-    resultado = modelo.predict(entrada)
+    global df, modelo, acuracia
+
+    dados = request.json
+    entrada = pd.DataFrame([dados])
+
+    if modelo is None:
+        return jsonify({"erro": "Poucos dados para prever"}), 400
+
+    prob = modelo.predict_proba(entrada)[0][1]
+
+    decisao = 1 if prob >= 0.8 else 0
+
+    # salvar previsão (feedback vem depois)
+    novo = entrada.copy()
+    novo['virou_cliente'] = decisao
+    df = pd.concat([df, novo], ignore_index=True)
+    df.to_csv(ARQUIVO, index=False)
 
     return jsonify({
-        'lead_quente': int(resultado[0])
+        "probabilidade_de_compra": round(prob, 2),
+        "lead_quente": decisao,
+        "acuracia_atual_modelo": acuracia
     })
 
-# ===== START =====
+# ===============================
+# ROTA DE FEEDBACK REAL
+# ===============================
+@app.route('/feedback', methods=['POST'])
+def feedback():
+    global df, modelo, acuracia
+
+    dados = request.json
+    df.loc[df.index[-1], 'virou_cliente'] = dados['virou_cliente']
+    df.to_csv(ARQUIVO, index=False)
+
+    modelo, acuracia = treinar_modelo()
+
+    return jsonify({
+        "mensagem": "Feedback recebido",
+        "nova_acuracia": acuracia
+    })
+
 if __name__ == "__main__":
     app.run()
