@@ -1,12 +1,11 @@
 import os
 import pandas as pd
 from flask import Flask, request, jsonify
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
 app = Flask(__name__)
-
 ARQUIVO = "leads.csv"
 
 # ===============================
@@ -36,7 +35,12 @@ def treinar_modelo():
         X, y, test_size=0.3, random_state=42
     )
 
-    modelo = DecisionTreeClassifier(max_depth=4)
+    modelo = RandomForestClassifier(
+    n_estimators=100,
+    max_depth=5,
+    min_samples_leaf=2,
+    random_state=42
+)
     modelo.fit(X_treino, y_treino)
 
     previsoes = modelo.predict(X_teste)
