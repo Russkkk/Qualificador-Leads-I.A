@@ -45,6 +45,8 @@ def treinar_modelo():
 
     previsoes = modelo.predict(X_teste)
     acc = accuracy_score(y_teste, previsoes)
+    
+    print(f"Acurácia atual do modelo: {acc}")
 
     return modelo, round(acc, 2)
 
@@ -75,8 +77,7 @@ def prever():
 
     return jsonify({
         "probabilidade_de_compra": round(prob, 2),
-        "lead_quente": decisao,
-        "acuracia_atual_modelo": acuracia
+        "lead_quente": decisao
     })
 
 # ===============================
