@@ -12,7 +12,7 @@ ARQUIVO = "leads.csv"
 # ===============================
 # Whatsapp link 
 # ===============================
-WHATSAPP_NUMERO = "+55 18 98162-1797"  # troque pelo seu número
+WHATSAPP_NUMERO = "5518981621797"  # troque pelo seu número
 def gerar_link_whatsapp(probabilidade):
     mensagem = (
         f"Olá! Vi seu interesse e posso te ajudar agora 😊\n\n"
@@ -90,14 +90,14 @@ def prever():
     df.to_csv(ARQUIVO, index=False)
 
     resposta = {
-    "probabilidade_de_compra": round(prob, 2),
-    "lead_quente": decisao
-}
+        "probabilidade_de_compra": round(prob, 2),
+        "lead_quente": decisao
+    }
 
-if decisao == 1:
-    resposta["whatsapp"] = gerar_link_whatsapp(prob)
+    if decisao == 1:
+        resposta["whatsapp"] = gerar_link_whatsapp(prob)
 
-return jsonify(resposta)
+    return jsonify(resposta)
 
 # ===============================
 # ROTA DE FEEDBACK REAL
