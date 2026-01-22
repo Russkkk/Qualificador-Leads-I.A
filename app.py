@@ -63,7 +63,7 @@ def prever():
     if modelo is None:
         return jsonify({"erro": "Poucos dados para prever"}), 400
 
-    prob = modelo.predict_proba(entrada)[0][1]
+    prob = min(modelo.predict_proba(entrada)[0][1], 0.95)
 
     decisao = 1 if prob >= 0.8 else 0
 
