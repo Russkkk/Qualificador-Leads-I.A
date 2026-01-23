@@ -1,4 +1,6 @@
 flask
 pandas
 scikit-learn
-gunicorn
+joblib
+python-dotenv
+pydantic
