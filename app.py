@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import joblib
+import pandas as pd
 from flask import Flask, request, jsonify
 from sklearn.ensemble import RandomForestClassifier
 import pandas as pd
@@ -18,6 +20,21 @@ WHATSAPP_NUMERO_PADRAO = "5511999999999"  # troque depois por cliente
 # ===============================
 # FUNÇÕES AUXILIARES
 # ===============================
+
+def get_model_path(client_id: str):
+    return os.path.join(DATA_DIR, f"{client_id}_model.pkl")
+
+
+def carregar_modelo(client_id):
+    path = get_model_path(client_id)
+    if os.path.exists(path):
+        return joblib.load(path)
+    return None
+
+
+def salvar_modelo(client_id, modelo):
+    joblib.dump(modelo, get_model_path(client_id))
+    
 
 def get_db_path(client_id: str):
     return os.path.join(DATA_DIR, f"{client_id}.db")
@@ -43,22 +60,21 @@ def carregar_dados(client_id):
 
 
 def treinar_modelo(df):
-    if len(df) < 5:
+    if len(df) < 10:
         return None
 
     X = df[["tempo_site", "paginas_visitadas", "clicou_preco"]]
     y = df["virou_cliente"]
 
     modelo = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=5,
+        n_estimators=120,
+        max_depth=6,
         min_samples_leaf=2,
         random_state=42
     )
 
     modelo.fit(X, y)
     return modelo
-
 
 # ===============================
 # ROTA PRINCIPAL
@@ -78,6 +94,12 @@ def prever():
             return jsonify({"erro": f"Campo ausente: {campo}"}), 400
 
     # -------- banco do cliente --------
+     df = carregar_dados(client_id)
+    modelo = treinar_modelo(df)
+
+    if modelo:
+        salvar_modelo(client_id, modelo)
+    
     db_path = get_db_path(client_id)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -95,11 +117,20 @@ def prever():
 
     # -------- carrega dados e treina --------
     df = carregar_dados(client_id)
-    modelo = treinar_modelo(df)
+    
+    # -------- MODELO DO CLIENTE --------
+    modelo = carregar_modelo(client_id)
 
     if modelo is None:
-        # ainda poucos dados → decisão conservadora
-        prob = 0.3
+        df = carregar_dados(client_id)
+        modelo = treinar_modelo(df)
+
+        if modelo:
+            salvar_modelo(client_id, modelo)
+
+    # -------- PREDIÇÃO --------
+    if modelo is None:
+        prob = 0.35
     else:
         entrada = pd.DataFrame([{
             "tempo_site": dados["tempo_site"],
@@ -107,9 +138,7 @@ def prever():
             "clicou_preco": dados["clicou_preco"]
         }])
         prob = min(modelo.predict_proba(entrada)[0][1], 0.95)
-
-    decisao = 1 if prob >= 0.8 else 0
-
+        
     # -------- salva lead --------
     cursor.execute("""
         INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
@@ -148,3 +177,4 @@ def home():
 
 if __name__ == "__main__":
     app.run()
+
