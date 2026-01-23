@@ -211,7 +211,7 @@ def feedback():
     try:
         dados = FeedbackData(**request.json).model_dump()
     except ValidationError as e:
-        return jupytext({'erro': str(e)}), 400
+        return jsonify({'erro': str(e)}), 400
 
     atualizar_feedback(dados['lead_id'], dados['virou_cliente'])
     contador_feedbacks += 1
@@ -233,4 +233,5 @@ def metrics():
     })
 
 if __name__ == '__main__':
+
     app.run(debug=False, host='0.0.0.0', port=5000)
