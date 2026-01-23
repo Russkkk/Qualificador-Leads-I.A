@@ -26,10 +26,9 @@ def get_db_path(client_id):
 def get_model_path(client_id):
     return os.path.join(DATA_DIR, f"{client_id}_model.pkl")
 
-def gerar_link_whatsapp():
-    mensagem = "Olá! Vi seu interesse e posso te ajudar agora 😊"
-    texto = mensagem.replace(" ", "%20")
-    return f"https://wa.me/{WHATSAPP_NUMERO_PADRAO}?text={texto}"
+def gerar_link_whatsapp(numero, mensagem):
+    texto = mensagem.replace(" ", "%20").replace("\n", "%0A")
+    return f"https://wa.me/{numero}?text={texto}"
 
 def carregar_dados(client_id):
     db_path = get_db_path(client_id)
@@ -84,6 +83,33 @@ def prever():
         if campo not in dados:
             return jsonify({"erro": f"Campo ausente: {campo}"}), 400
 
+    #-------- LEADS --------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS config (
+            id INTEGER PRIMARY KEY,
+            whatsapp TEXT,
+            threshold REAL,
+            mensagem TEXT
+        )
+    """)
+    conn.commit()
+    cursor.execute("SELECT COUNT(*) FROM config")
+    existe_config = cursor.fetchone()[0]
+
+    if existe_config == 0:
+        cursor.execute("""
+            INSERT INTO config (id, whatsapp, threshold, mensagem)
+            VALUES (1, ?, ?, ?)
+        """, (
+            WHATSAPP_NUMERO_PADRAO,
+            0.8,
+            "Olá! Vi seu interesse e posso te ajudar agora 😊"
+        ))
+        conn.commit()
+        cursor.execute("SELECT whatsapp, threshold, mensagem FROM config WHERE id = 1")
+    whatsapp, threshold, mensagem = cursor.fetchone()
+    
+    
     # -------- BANCO DO CLIENTE --------
     db_path = get_db_path(client_id)
     conn = sqlite3.connect(db_path)
@@ -119,7 +145,7 @@ def prever():
         }])
         prob = min(modelo.predict_proba(entrada)[0][1], 0.95)
 
-    decisao = 1 if prob >= 0.8 else 0
+    decisao = 1 if prob >= threshold else 0
 
     # -------- SALVAR LEAD --------
     cursor.execute("""
@@ -147,7 +173,7 @@ def prever():
     }
 
     if decisao == 1:
-        resposta["whatsapp"] = gerar_link_whatsapp()
+        resposta["whatsapp"] = gerar_link_whatsapp(whatsapp, mensagem)
 
     return jsonify(resposta)
 
