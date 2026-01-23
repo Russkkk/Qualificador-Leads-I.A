@@ -83,38 +83,12 @@ def prever():
         if campo not in dados:
             return jsonify({"erro": f"Campo ausente: {campo}"}), 400
 
-    #-------- LEADS --------
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS config (
-            id INTEGER PRIMARY KEY,
-            whatsapp TEXT,
-            threshold REAL,
-            mensagem TEXT
-        )
-    """)
-    conn.commit()
-    cursor.execute("SELECT COUNT(*) FROM config")
-    existe_config = cursor.fetchone()[0]
-
-    if existe_config == 0:
-        cursor.execute("""
-            INSERT INTO config (id, whatsapp, threshold, mensagem)
-            VALUES (1, ?, ?, ?)
-        """, (
-            WHATSAPP_NUMERO_PADRAO,
-            0.8,
-            "Olá! Vi seu interesse e posso te ajudar agora 😊"
-        ))
-        conn.commit()
-        cursor.execute("SELECT whatsapp, threshold, mensagem FROM config WHERE id = 1")
-    whatsapp, threshold, mensagem = cursor.fetchone()
-    
-    
     # -------- BANCO DO CLIENTE --------
     db_path = get_db_path(client_id)
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    # Tabela de leads
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +98,35 @@ def prever():
             virou_cliente INTEGER
         )
     """)
+
+    # Tabela de configuração
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS config (
+            id INTEGER PRIMARY KEY,
+            whatsapp TEXT,
+            threshold REAL,
+            mensagem TEXT
+        )
+    """)
+
     conn.commit()
+
+    # Config padrão (se não existir)
+    cursor.execute("SELECT COUNT(*) FROM config")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO config (id, whatsapp, threshold, mensagem)
+            VALUES (1, ?, ?, ?)
+        """, (
+            WHATSAPP_NUMERO_PADRAO,
+            0.8,
+            "Olá! Vi seu interesse e posso te ajudar agora 😊"
+        ))
+        conn.commit()
+
+    # Lê config
+    cursor.execute("SELECT whatsapp, threshold, mensagem FROM config WHERE id = 1")
+    whatsapp, threshold, mensagem = cursor.fetchone()
 
     # -------- MODELO --------
     modelo = carregar_modelo(client_id)
@@ -157,10 +159,11 @@ def prever():
         dados["clicou_preco"],
         decisao
     ))
+
     conn.commit()
     conn.close()
 
-    # -------- RE-TREINAR --------
+    # -------- RE-TREINO --------
     df = carregar_dados(client_id)
     modelo = treinar_modelo(df)
     if modelo:
