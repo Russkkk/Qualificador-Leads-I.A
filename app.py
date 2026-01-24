@@ -40,8 +40,10 @@ def carregar_dados(client_id):
     return df
 
 def treinar_modelo(df):
-    if len(df) < 10:
+    if len(df) < 4:
         return None
+    
+    return None
 
     X = df[["tempo_site", "paginas_visitadas", "clicou_preco"]]
     y = df["virou_cliente"]
@@ -54,7 +56,6 @@ def treinar_modelo(df):
     )
 
     modelo.fit(X, y)
-    return modelo
 
 def carregar_modelo(client_id):
     path = get_model_path(client_id)
@@ -154,23 +155,19 @@ def prever():
 
     # -------- SALVAR LEAD --------
     cursor.execute("""
-        INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
-        VALUES (?, ?, ?, ?)
-    """, (
-        dados["tempo_site"],
-        dados["paginas_visitadas"],
-        dados["clicou_preco"],
-        decisao
-    ))
+    INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
+    VALUES (?, ?, ?, NULL)
+""", (
+    dados["tempo_site"],
+    dados["paginas_visitadas"],
+    dados["clicou_preco"]
+))
 
     conn.commit()
     conn.close()
 
     # -------- RE-TREINO --------
-    df = carregar_dados(client_id)
-    modelo = treinar_modelo(df)
-    if modelo:
-        salvar_modelo(client_id, modelo)
+    df = df.dropna(subset=["virou_cliente"])
 
     resposta = {
         "client_id": client_id,
