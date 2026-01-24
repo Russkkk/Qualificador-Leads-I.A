@@ -1,61 +1,78 @@
-import os
-import sqlite3
-import joblib
 from flask import Flask, request, jsonify
-from sklearn.ensemble import RandomForestClassifier
-import pandas as pd
 from flask_cors import CORS
-
-# ===============================
-# CONFIGURAÇÕES
-# ===============================
+import sqlite3
+import os
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+import joblib
 
 app = Flask(__name__)
 CORS(app)
 
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
+BASE_DIR = "data"
+MODELS_DIR = "models"
 
-WHATSAPP_NUMERO_PADRAO = "5511999999999"
+os.makedirs(BASE_DIR, exist_ok=True)
+os.makedirs(MODELS_DIR, exist_ok=True)
 
-# ===============================
-# FUNÇÕES AUXILIARES
-# ===============================
+# -----------------------------
+# UTILIDADES
+# -----------------------------
 
 def get_db_path(client_id):
-    return os.path.join(DATA_DIR, f"{client_id}.db")
+    return os.path.join(BASE_DIR, f"{client_id}.db")
 
 def get_model_path(client_id):
-    return os.path.join(DATA_DIR, f"{client_id}_model.pkl")
+    return os.path.join(MODELS_DIR, f"{client_id}.pkl")
 
-def gerar_link_whatsapp(numero, mensagem):
-    texto = mensagem.replace(" ", "%20").replace("\n", "%0A")
-    return f"https://wa.me/{numero}?text={texto}"
+def conectar_db(client_id):
+    conn = sqlite3.connect(get_db_path(client_id))
+    return conn
+
+def criar_tabela(client_id):
+    conn = conectar_db(client_id)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tempo_site INTEGER,
+            paginas_visitadas INTEGER,
+            clicou_preco INTEGER,
+            virou_cliente INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 def carregar_dados(client_id):
-    db_path = get_db_path(client_id)
-    conn = sqlite3.connect(db_path)
+    conn = conectar_db(client_id)
     df = pd.read_sql_query("SELECT * FROM leads", conn)
     conn.close()
     return df
 
+# -----------------------------
+# MODELO
+# -----------------------------
+
 def treinar_modelo(df):
+    df = df.dropna(subset=["virou_cliente"])
+
     if len(df) < 4:
         return None
-    
-    return None
+
+    if df["virou_cliente"].nunique() < 2:
+        return None
 
     X = df[["tempo_site", "paginas_visitadas", "clicou_preco"]]
     y = df["virou_cliente"]
 
-    modelo = RandomForestClassifier(
-        n_estimators=120,
-        max_depth=6,
-        min_samples_leaf=2,
-        random_state=42
-    )
+    model = LogisticRegression()
+    model.fit(X, y)
 
-    modelo.fit(X, y)
+    return model
+
+def salvar_modelo(client_id, model):
+    joblib.dump(model, get_model_path(client_id))
 
 def carregar_modelo(client_id):
     path = get_model_path(client_id)
@@ -63,173 +80,96 @@ def carregar_modelo(client_id):
         return joblib.load(path)
     return None
 
-def salvar_modelo(client_id, modelo):
-    joblib.dump(modelo, get_model_path(client_id))
-
-# ===============================
+# -----------------------------
 # ROTAS
-# ===============================
-
-@app.route("/")
-def home():
-    return {"status": "API IA ativa \U0001f680"}
+# -----------------------------
 
 @app.route("/prever", methods=["POST"])
 def prever():
     dados = request.json
-
     client_id = dados.get("client_id")
+
     if not client_id:
-        return jsonify({"erro": "client_id é obrigatório"}), 400
+        return jsonify({"erro": "client_id obrigatório"}), 400
 
-    for campo in ["tempo_site", "paginas_visitadas", "clicou_preco"]:
-        if campo not in dados:
-            return jsonify({"erro": f"Campo ausente: {campo}"}), 400
+    criar_tabela(client_id)
 
-    # -------- BANCO DO CLIENTE --------
-    db_path = get_db_path(client_id)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    tempo_site = dados["tempo_site"]
+    paginas = dados["paginas_visitadas"]
+    clicou = dados["clicou_preco"]
 
-    # Tabela de leads
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS leads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tempo_site INTEGER,
-            paginas_visitadas INTEGER,
-            clicou_preco INTEGER,
-            virou_cliente INTEGER,
-            data TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    df = carregar_dados(client_id)
+    model = carregar_modelo(client_id)
 
-    # Tabela de configuração
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS config (
-            id INTEGER PRIMARY KEY,
-            whatsapp TEXT,
-            threshold REAL,
-            mensagem TEXT
-        )
-    """)
+    if model is None:
+        model = treinar_modelo(df)
+        if model:
+            salvar_modelo(client_id, model)
 
-    conn.commit()
-
-    # Config padrão (se não existir)
-    cursor.execute("SELECT COUNT(*) FROM config")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("""
-            INSERT INTO config (id, whatsapp, threshold, mensagem)
-            VALUES (1, ?, ?, ?)
-        """, (
-            WHATSAPP_NUMERO_PADRAO,
-            0.8,
-            "Olá! Vi seu interesse e posso te ajudar agora 😊"
-        ))
-        conn.commit()
-
-    # Lê config
-    cursor.execute("SELECT whatsapp, threshold, mensagem FROM config WHERE id = 1")
-    whatsapp, threshold, mensagem = cursor.fetchone()
-
-    # -------- MODELO --------
-    modelo = carregar_modelo(client_id)
-
-    if modelo is None:
-        df = carregar_dados(client_id)
-        modelo = treinar_modelo(df)
-        if modelo:
-            salvar_modelo(client_id, modelo)
-
-    if modelo is None:
-        prob = 0.35
+    if model:
+        prob = model.predict_proba([[tempo_site, paginas, clicou]])[0][1]
     else:
-        entrada = pd.DataFrame([{
-            "tempo_site": dados["tempo_site"],
-            "paginas_visitadas": dados["paginas_visitadas"],
-            "clicou_preco": dados["clicou_preco"]
-        }])
-        prob = min(modelo.predict_proba(entrada)[0][1], 0.95)
+        prob = 0.35  # fallback consciente
 
-    decisao = 1 if prob >= threshold else 0
+    lead_quente = 1 if prob >= 0.7 else 0
 
-    # -------- SALVAR LEAD --------
+    conn = conectar_db(client_id)
+    cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
-    VALUES (?, ?, ?, NULL)
-""", (
-    dados["tempo_site"],
-    dados["paginas_visitadas"],
-    dados["clicou_preco"]
-))
-
+        INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
+        VALUES (?, ?, ?, NULL)
+    """, (tempo_site, paginas, clicou))
     conn.commit()
     conn.close()
 
-    # -------- RE-TREINO --------
-    df = df.dropna(subset=["virou_cliente"])
+    return jsonify({
+        "probabilidade_de_compra": round(float(prob), 2),
+        "lead_quente": lead_quente
+    })
 
-    resposta = {
-        "client_id": client_id,
-        "probabilidade_de_compra": round(prob, 2),
-        "lead_quente": decisao
-    }
+@app.route("/confirmar_venda", methods=["POST"])
+def confirmar_venda():
+    dados = request.json
+    client_id = dados.get("client_id")
+    lead_id = dados.get("lead_id")
 
-    if decisao == 1:
-        resposta["whatsapp"] = gerar_link_whatsapp(whatsapp, mensagem)
+    if not client_id or not lead_id:
+        return jsonify({"erro": "client_id e lead_id obrigatórios"}), 400
 
-    return jsonify(resposta)
+    conn = conectar_db(client_id)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE leads SET virou_cliente = 1 WHERE id = ?",
+        (lead_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "venda confirmada"})
+
 
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     client_id = request.args.get("client_id")
-    dias = int(request.args.get("dias", 30))
+    dias = int(request.args.get("dias", 7))
 
     if not client_id:
-        return jsonify({"erro": "client_id é obrigatório"}), 400
+        return jsonify({"erro": "client_id obrigatório"}), 400
 
-    db_path = get_db_path(client_id)
+    df = carregar_dados(client_id)
 
-    if not os.path.exists(db_path):
-        return jsonify({"erro": "Cliente não encontrado"}), 404
+    if df.empty:
+        return jsonify([])
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    # total de leads
-    cursor.execute("""
-    SELECT COUNT(*) FROM leads
-    WHERE data >= datetime('now', ?)
-""", (f"-{dias} days",))
-    total = cursor.fetchone()[0]
-
-    cursor.execute("""
-    SELECT COUNT(*) FROM leads
-    WHERE virou_cliente = 1
-    AND data >= datetime('now', ?)
-""", (f"-{dias} days",))
-    quentes = cursor.fetchone()[0]
-
-    cursor.execute("""
-    SELECT COUNT(*) FROM leads
-    WHERE virou_cliente = 0
-    AND data >= datetime('now', ?)
-""", (f"-{dias} days",))
-    frios = cursor.fetchone()[0]
-
-    taxa = round((quentes / total) * 100, 2) if total > 0 else 0
+    total = len(df)
+    quentes = df[df["virou_cliente"] == 1].shape[0]
+    frios = total - quentes
 
     return jsonify({
-        "client_id": client_id,
         "total_leads": total,
         "leads_quentes": quentes,
-        "leads_frios": frios,
-        "taxa_conversao_percent": taxa
+        "leads_frios": frios
     })
 
-# ===============================
-# MAIN
-# ===============================
-
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
