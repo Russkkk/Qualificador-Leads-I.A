@@ -11,6 +11,7 @@ cursor = conn.cursor()
 # Limpa tabela se quiser recomeçar (opcional)
 # cursor.execute("DELETE FROM leads")
 
+for _, row in df.iterrows():
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,11 +22,20 @@ CREATE TABLE IF NOT EXISTS leads (
 )
 """)
 
-for _, row in df.iterrows():
-    cursor.execute("""
-        INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
-        VALUES (?, ?, ?, ?)
-    """, (row['tempo_site'], row['paginas_visitadas'], row['clicou_preco'], row['virou_cliente']))
+dados = [
+    (5, 1, 0, 0),
+    (8, 2, 0, 0),
+    (12, 3, 1, 0),
+    (15, 4, 1, 0),
+    (20, 5, 1, 1),
+    (25, 6, 1, 1),
+    (30, 8, 1, 1)
+]
+
+cursor.executemany("""
+INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
+VALUES (?, ?, ?, ?)
+""", dados)
 
 conn.commit()
 conn.close()
@@ -43,3 +53,4 @@ leads (
   clicou_preco INTEGER,
   virou_cliente INTEGER
 )
+
