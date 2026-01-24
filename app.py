@@ -180,6 +180,45 @@ def prever():
 
     return jsonify(resposta)
 
+@app.route("/dashboard", methods=["GET"])
+def dashboard():
+    client_id = request.args.get("client_id")
+
+    if not client_id:
+        return jsonify({"erro": "client_id é obrigatório"}), 400
+
+    db_path = get_db_path(client_id)
+
+    if not os.path.exists(db_path):
+        return jsonify({"erro": "Cliente não encontrado"}), 404
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # total de leads
+    cursor.execute("SELECT COUNT(*) FROM leads")
+    total = cursor.fetchone()[0]
+
+    # leads quentes
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE virou_cliente = 1")
+    quentes = cursor.fetchone()[0]
+
+    # leads frios
+    cursor.execute("SELECT COUNT(*) FROM leads WHERE virou_cliente = 0")
+    frios = cursor.fetchone()[0]
+
+    conn.close()
+
+    taxa = round((quentes / total) * 100, 2) if total > 0 else 0
+
+    return jsonify({
+        "client_id": client_id,
+        "total_leads": total,
+        "leads_quentes": quentes,
+        "leads_frios": frios,
+        "taxa_conversao_percent": taxa
+    })
+
 # ===============================
 # MAIN
 # ===============================
