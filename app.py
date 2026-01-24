@@ -2,6 +2,7 @@ import os
 import sqlite3
 import joblib
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from sklearn.ensemble import RandomForestClassifier
 import pandas as pd
 
@@ -10,6 +11,9 @@ import pandas as pd
 # ===============================
 
 app = Flask(__name__)
+
+app = Flask(__name__)
+CORS(app)
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
