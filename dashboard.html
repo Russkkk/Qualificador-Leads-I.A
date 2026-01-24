@@ -50,13 +50,14 @@
   <div class="container">
     <h1>📊 Dashboard de Leads</h1>
 
-    <select id="dias">
+    <input id="client" placeholder="client_id" />
+
+    <select id="dias" onchange="carregar()">
   <option value="7">Últimos 7 dias</option>
   <option value="30" selected>Últimos 30 dias</option>
   <option value="90">Últimos 90 dias</option>
 </select>
 
-    <input id="client" placeholder="client_id" />
     <button onclick="carregar()">Carregar dados</button>
 
     <div class="cards">
@@ -80,31 +81,47 @@
   </div>
 
   <script>
-    let chart;
+  let chart;
 
-    function carregar() {
-      const client = document.getElementById("client").value;
+  function carregar() {
+    const client = document.getElementById("client").value;
+    const dias = document.getElementById("dias").value;
 
-      fetch(`https://qualificador-leads-i-a.onrender.com/dashboard?client_id=${client}`)
-        .then(r => r.json())
-        .then(d => {
-          document.getElementById("total").innerText = d.total_leads;
-          document.getElementById("quentes").innerText = d.leads_quentes;
-          document.getElementById("frios").innerText = d.leads_frios;
+    fetch(`https://qualificador-leads-i-a.onrender.com/dashboard?client_id=${client}&dias=${dias}`)
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById("total").innerText = d.total_leads;
+        document.getElementById("quentes").innerText = d.leads_quentes;
+        document.getElementById("frios").innerText = d.leads_frios;
 
-          if (chart) chart.destroy();
+        if (chart) chart.destroy();
 
-          chart = new Chart(document.getElementById("grafico"), {
-            type: "doughnut",
-            data: {
-              labels: ["Quentes", "Frios"],
-              datasets: [{
-                data: [d.leads_quentes, d.leads_frios]
-              }]
-            }
-          });
+        chart = new Chart(document.getElementById("grafico"), {
+          type: "doughnut",
+          data: {
+            labels: ["Quentes", "Frios"],
+            datasets: [{
+              data: [d.leads_quentes, d.leads_frios]
+            }]
+          }
         });
-    }
-  </script>
+
+        document.getElementById("grafico").onclick = function(evt) {
+          const points = chart.getElementsAtEventForMode(
+            evt,
+            'nearest',
+            { intersect: true },
+            true
+          );
+
+          if (points.length) {
+            const index = points[0].index;
+            const tipo = chart.data.labels[index];
+            alert("Você clicou em leads: " + tipo);
+          }
+        };
+      });
+  }
+</script>
 </body>
 </html>
