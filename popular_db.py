@@ -1,17 +1,11 @@
 import sqlite3
-import pandas as pd
 
 DB_FILE = "leads.db"
-
-df = pd.read_csv("leads_teste.csv")
 
 conn = sqlite3.connect(DB_FILE)
 cursor = conn.cursor()
 
-# Limpa tabela se quiser recomeçar (opcional)
-# cursor.execute("DELETE FROM leads")
-
-for _, row in df.iterrows():
+# Criar tabela corretamente
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,6 +16,7 @@ CREATE TABLE IF NOT EXISTS leads (
 )
 """)
 
+# Dados realistas (frius + quentes)
 dados = [
     (5, 1, 0, 0),
     (8, 2, 0, 0),
@@ -40,17 +35,4 @@ VALUES (?, ?, ?, ?)
 conn.commit()
 conn.close()
 
-print("Dados inseridos com sucesso!")
-
-# ==============================================
-# =====-------------LEADS-------------==========
-# ==============================================
-
-leads (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tempo_site INTEGER,
-  paginas_visitadas INTEGER,
-  clicou_preco INTEGER,
-  virou_cliente INTEGER
-)
-
+print("✅ Banco populado com dados de treino!")
