@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS leads (
 """)
 
 # Dados realistas (frius + quentes)
-dados = [
+dados = [1
     (5, 1, 0, 0),
     (8, 2, 0, 0),
     (12, 3, 1, 0),
@@ -26,6 +26,7 @@ dados = [
     (25, 6, 1, 1),
     (30, 8, 1, 1)
 ]
+
 
 cursor.executemany("""
 INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
