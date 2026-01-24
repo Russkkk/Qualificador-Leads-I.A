@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dashboard IA</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: auto;
+    }
+
+    .cards {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      flex: 1;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+
+    canvas {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    input, button {
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>📊 Dashboard de Leads</h1>
+
+    <select id="dias">
+  <option value="7">Últimos 7 dias</option>
+  <option value="30" selected>Últimos 30 dias</option>
+  <option value="90">Últimos 90 dias</option>
+</select>
+
+    <input id="client" placeholder="client_id" />
+    <button onclick="carregar()">Carregar dados</button>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Total Leads</h3>
+        <p id="total">-</p>
+      </div>
+
+      <div class="card">
+        <h3>Leads Quentes</h3>
+        <p id="quentes">-</p>
+      </div>
+
+      <div class="card">
+        <h3>Leads Frios</h3>
+        <p id="frios">-</p>
+      </div>
+    </div>
+
+    <canvas id="grafico" height="120"></canvas>
+  </div>
+
+  <script>
+    let chart;
+
+    function carregar() {
+      const client = document.getElementById("client").value;
+
+      fetch(`https://qualificador-leads-i-a.onrender.com/dashboard?client_id=${client}`)
+        .then(r => r.json())
+        .then(d => {
+          document.getElementById("total").innerText = d.total_leads;
+          document.getElementById("quentes").innerText = d.leads_quentes;
+          document.getElementById("frios").innerText = d.leads_frios;
+
+          if (chart) chart.destroy();
+
+          chart = new Chart(document.getElementById("grafico"), {
+            type: "doughnut",
+            data: {
+              labels: ["Quentes", "Frios"],
+              datasets: [{
+                data: [d.leads_quentes, d.leads_frios]
+              }]
+            }
+          });
+        });
+    }
+  </script>
+</body>
+</html>
