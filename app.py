@@ -69,7 +69,7 @@ def salvar_modelo(client_id, modelo):
 
 @app.route("/")
 def home():
-    return {"status": "API IA ativa 🚀"}
+    return {"status": "API IA ativa \U0001f680"}
 
 @app.route("/prever", methods=["POST"])
 def prever():
@@ -95,7 +95,8 @@ def prever():
             tempo_site INTEGER,
             paginas_visitadas INTEGER,
             clicou_preco INTEGER,
-            virou_cliente INTEGER
+            virou_cliente INTEGER,
+            data TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -183,6 +184,7 @@ def prever():
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     client_id = request.args.get("client_id")
+    dias = int(request.args.get("dias", 30))
 
     if not client_id:
         return jsonify({"erro": "client_id é obrigatório"}), 400
@@ -196,18 +198,25 @@ def dashboard():
     cursor = conn.cursor()
 
     # total de leads
-    cursor.execute("SELECT COUNT(*) FROM leads")
+    cursor.execute("""
+    SELECT COUNT(*) FROM leads
+    WHERE data >= datetime('now', ?)
+""", (f"-{dias} days",))
     total = cursor.fetchone()[0]
 
-    # leads quentes
-    cursor.execute("SELECT COUNT(*) FROM leads WHERE virou_cliente = 1")
+    cursor.execute("""
+    SELECT COUNT(*) FROM leads
+    WHERE virou_cliente = 1
+    AND data >= datetime('now', ?)
+""", (f"-{dias} days",))
     quentes = cursor.fetchone()[0]
 
-    # leads frios
-    cursor.execute("SELECT COUNT(*) FROM leads WHERE virou_cliente = 0")
+    cursor.execute("""
+    SELECT COUNT(*) FROM leads
+    WHERE virou_cliente = 0
+    AND data >= datetime('now', ?)
+""", (f"-{dias} days",))
     frios = cursor.fetchone()[0]
-
-    conn.close()
 
     taxa = round((quentes / total) * 100, 2) if total > 0 else 0
 
