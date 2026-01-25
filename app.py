@@ -163,11 +163,10 @@ def confirmar_venda():
     cursor = conn.cursor()
 
     cursor.execute("""
-        UPDATE leads
-        SET virou_cliente = 1
-        WHERE id = ?
-    """, (lead_id,))
-
+    UPDATE leads
+    SET virou_cliente = 0
+    WHERE virou_cliente IS NULL
+""")
     conn.commit()
     conn.close()
 
