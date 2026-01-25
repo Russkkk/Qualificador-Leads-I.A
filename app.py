@@ -1,76 +1,51 @@
-import os
-import sqlite3
-import joblib
-import pandas as pd
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import sqlite3
+import os
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
-
-# ======================
-# APP CONFIG
-# ======================
 
 app = Flask(__name__)
 CORS(app)
 
-os.makedirs("data", exist_ok=True)
-os.makedirs("models", exist_ok=True)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-# ======================
-# DATABASE
-# ======================
-
-def db_path(client_id):
-    return f"data/{client_id}.db"
-
-
-def conectar_db(client_id):
-    return sqlite3.connect(db_path(client_id))
-
-
-def criar_tabela(client_id):
-    conn = conectar_db(client_id)
+# ---------------------------
+# Banco por cliente
+# ---------------------------
+def get_db(client_id):
+    db_path = os.path.join(DATA_DIR, f"{client_id}.db")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     cursor = conn.cursor()
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS leads (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tempo_site INTEGER,
-        paginas_visitadas INTEGER,
-        clicou_preco INTEGER,
-        virou_cliente INTEGER
-    )
+        CREATE TABLE IF NOT EXISTS leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tempo_site INTEGER,
+            paginas_visitadas INTEGER,
+            clicou_preco INTEGER,
+            virou_cliente INTEGER
+        )
     """)
-
     conn.commit()
-    conn.close()
+    return conn, cursor
 
-# ======================
-# MODELO
-# ======================
 
+# ---------------------------
+# Treinar modelo
+# ---------------------------
 def treinar_modelo(client_id):
-    conn = conectar_db(client_id)
-    cursor = conn.cursor()
+    conn, cursor = get_db(client_id)
 
-    # 🔥 FORÇA LEADS NÃO CONFIRMADOS A VIRAREM 0
-    cursor.execute("""
-        UPDATE leads
-        SET virou_cliente = 0
-        WHERE virou_cliente IS NULL
-    """)
-    conn.commit()
+    df = pd.read_sql("SELECT * FROM leads", conn)
 
-    df = pd.read_sql("""
-        SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
-        FROM leads
-        WHERE virou_cliente IN (0, 1)
-    """, conn)
+    if df.empty:
+        return None
 
-    conn.close()
+    df["virou_cliente"] = df["virou_cliente"].fillna(0)
 
-    # precisa de pelo menos 2 classes
     if df["virou_cliente"].nunique() < 2:
         return None
 
@@ -80,76 +55,54 @@ def treinar_modelo(client_id):
     model = LogisticRegression()
     model.fit(X, y)
 
-    joblib.dump(model, f"models/{client_id}.joblib")
     return model
 
 
-def carregar_modelo(client_id):
-    caminho = f"models/{client_id}.joblib"
-    if os.path.exists(caminho):
-        return joblib.load(caminho)
-    return None
-
-# ======================
-# ROTAS
-# ======================
-
+# ---------------------------
+# PREVER LEAD
+# ---------------------------
 @app.route("/prever", methods=["POST"])
 def prever():
-    try:
-        data = request.get_json(silent=True) or {}
+    data = request.get_json()
 
-        client_id = data.get("client_id")
-        tempo_site = data.get("tempo_site")
-        paginas = data.get("paginas_visitadas")
-        clicou = data.get("clicou_preco")
+    client_id = data.get("client_id")
+    tempo_site = data.get("tempo_site")
+    paginas = data.get("paginas_visitadas")
+    clicou = data.get("clicou_preco")
 
-        if not client_id:
-            return jsonify({"erro": "client_id obrigatório"}), 400
+    if not client_id:
+        return jsonify({"erro": "client_id obrigatório"}), 400
 
-        criar_tabela(client_id)
+    conn, cursor = get_db(client_id)
 
-        conn = conectar_db(client_id)
-        cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
+        VALUES (?, ?, ?, NULL)
+    """, (tempo_site, paginas, clicou))
+    conn.commit()
 
-        cursor.execute("""
-            INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
-            VALUES (?, ?, ?, NULL)
-        """, (tempo_site, paginas, clicou))
+    lead_id = cursor.lastrowid
 
-        conn.commit()
-        lead_id = cursor.lastrowid
-        conn.close()
+    model = treinar_modelo(client_id)
 
-        model = carregar_modelo(client_id)
+    if model:
+        prob = model.predict_proba([[tempo_site, paginas, clicou]])[0][1]
+    else:
+        prob = 0.35
 
-        if not model:
-            prob = 0.35
-        else:
-            X = pd.DataFrame([{
-                "tempo_site": tempo_site,
-                "paginas_visitadas": paginas,
-                "clicou_preco": clicou
-            }])
-            prob = float(model.predict_proba(X)[0][1])
-
-        return jsonify({
-            "lead_id": lead_id,
-            "probabilidade_de_compra": round(prob, 2),
-            "lead_quente": int(prob >= 0.6)
-        })
-
-    except Exception as e:
-        # 🔥 ISSO MOSTRA O ERRO REAL NO RENDER
-        return jsonify({
-            "erro": "erro interno no /prever",
-            "detalhe": str(e)
-        }), 500
+    return jsonify({
+        "lead_id": lead_id,
+        "probabilidade_de_compra": round(float(prob), 2),
+        "lead_quente": 1 if prob >= 0.7 else 0
+    })
 
 
+# ---------------------------
+# CONFIRMAR VENDA
+# ---------------------------
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json()
 
     client_id = data.get("client_id")
     lead_id = data.get("lead_id")
@@ -157,26 +110,51 @@ def confirmar_venda():
     if not client_id or not lead_id:
         return jsonify({"erro": "client_id e lead_id obrigatórios"}), 400
 
-    criar_tabela(client_id)
-
-    conn = conectar_db(client_id)
-    cursor = conn.cursor()
+    conn, cursor = get_db(client_id)
 
     cursor.execute("""
-    UPDATE leads
-    SET virou_cliente = 0
-    WHERE virou_cliente IS NULL
-""")
+        UPDATE leads SET virou_cliente = 1 WHERE id = ?
+    """, (lead_id,))
+
+    cursor.execute("""
+        UPDATE leads SET virou_cliente = 0 WHERE virou_cliente IS NULL
+    """)
+
     conn.commit()
-    conn.close()
 
     treinar_modelo(client_id)
 
     return jsonify({"status": "venda_confirmada"})
 
-# ======================
-# START
-# ======================
 
+# ---------------------------
+# DASHBOARD API
+# ---------------------------
+@app.route("/dashboard_data", methods=["GET"])
+def dashboard_data():
+    client_id = request.args.get("client_id")
+
+    if not client_id:
+        return jsonify({"erro": "client_id obrigatório"}), 400
+
+    conn, cursor = get_db(client_id)
+
+    df = pd.read_sql("SELECT * FROM leads", conn)
+
+    total = len(df)
+    quentes = len(df[df["virou_cliente"] == 1])
+    frios = total - quentes
+
+    return jsonify({
+        "total_leads": total,
+        "leads_quentes": quentes,
+        "leads_frios": frios,
+        "dados": df.fillna(0).to_dict(orient="records")
+    })
+
+
+# ---------------------------
+# START
+# ---------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=10000)
