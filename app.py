@@ -7,9 +7,9 @@ from sklearn.linear_model import LogisticRegression
 import hashlib
 import requests
 
-# =========================
-# CONFIG
-# =========================
+# =====================
+# APP CONFIG
+# =====================
 app = Flask(__name__)
 CORS(app)
 
@@ -22,22 +22,22 @@ USERS_DB = os.path.join(BASE_DIR, "users.db")
 ZAPI_URL = "https://api.z-api.io/instances/SEU_ID/token/SEU_TOKEN/send-text"
 WHATSAPP_DESTINO = "5518999999999"
 
-# =========================
+# =====================
 # WHATSAPP
-# =========================
+# =====================
 def enviar_whatsapp(numero, mensagem):
     try:
         requests.post(
             ZAPI_URL,
             json={"phone": numero, "message": mensagem},
-            timeout=10
+            timeout=5
         )
     except:
         pass
 
-# =========================
+# =====================
 # USERS DB
-# =========================
+# =====================
 def init_users_db():
     conn = sqlite3.connect(USERS_DB)
     c = conn.cursor()
@@ -54,21 +54,9 @@ def init_users_db():
 
 init_users_db()
 
-def autenticar(email, password):
-    conn = sqlite3.connect(USERS_DB)
-    c = conn.cursor()
-    senha = hashlib.sha256(password.encode()).hexdigest()
-    c.execute(
-        "SELECT client_id FROM users WHERE email=? AND password=?",
-        (email, senha)
-    )
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
-
-# =========================
-# DB CLIENTE
-# =========================
+# =====================
+# CLIENT DB
+# =====================
 def get_db(client_id):
     path = os.path.join(DATA_DIR, f"{client_id}.db")
     conn = sqlite3.connect(path)
@@ -85,9 +73,9 @@ def get_db(client_id):
     conn.commit()
     return conn, c
 
-# =========================
+# =====================
 # IA
-# =========================
+# =====================
 def treinar_modelo(client_id):
     conn, _ = get_db(client_id)
     df = pd.read_sql("SELECT * FROM leads", conn)
@@ -107,22 +95,34 @@ def treinar_modelo(client_id):
     model.fit(X, y)
     return model
 
-# =========================
+# =====================
 # LOGIN
-# =========================
+# =====================
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-    client_id = autenticar(data.get("email"), data.get("password"))
+    email = data.get("email")
+    password = data.get("password")
 
-    if not client_id:
+    senha = hashlib.sha256(password.encode()).hexdigest()
+
+    conn = sqlite3.connect(USERS_DB)
+    c = conn.cursor()
+    c.execute(
+        "SELECT client_id FROM users WHERE email=? AND password=?",
+        (email, senha)
+    )
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
         return jsonify({"erro": "login inválido"}), 401
 
-    return jsonify({"client_id": client_id})
+    return jsonify({"client_id": row[0]})
 
-# =========================
+# =====================
 # PREVER
-# =========================
+# =====================
 @app.route("/prever", methods=["POST"])
 def prever():
     data = request.get_json()
@@ -146,11 +146,7 @@ def prever():
 
     model = treinar_modelo(client_id)
 
-    if model:
-        prob = float(model.predict_proba([[tempo, paginas, clicou]])[0][1])
-    else:
-        prob = 0.35
-
+    prob = float(model.predict_proba([[tempo, paginas, clicou]])[0][1]) if model else 0.35
     lead_quente = prob >= 0.7
 
     if lead_quente:
@@ -165,9 +161,9 @@ def prever():
         "lead_quente": int(lead_quente)
     })
 
-# =========================
+# =====================
 # CONFIRMAR VENDA
-# =========================
+# =====================
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
     data = request.get_json()
@@ -181,34 +177,10 @@ def confirmar_venda():
     c.execute("UPDATE leads SET virou_cliente = 1 WHERE id = ?", (lead_id,))
     conn.commit()
 
-    enviar_whatsapp(
-        WHATSAPP_DESTINO,
-        f"✅ Venda confirmada! Lead #{lead_id}"
-    )
-
     return jsonify({"status": "ok"})
 
-# =========================
-# DASHBOARD
-# =========================
-@app.route("/dashboard_data")
-def dashboard_data():
-    client_id = request.args.get("client_id")
-    if not client_id:
-        return jsonify({"erro": "client_id obrigatório"}), 400
-
-    conn, _ = get_db(client_id)
-    df = pd.read_sql("SELECT * FROM leads", conn)
-
-    return jsonify({
-        "total": len(df),
-        "quentes": int((df["virou_cliente"] == 1).sum()),
-        "frios": int((df["virou_cliente"] != 1).sum()),
-        "dados": df.fillna(0).to_dict("records")
-    })
-
-# =========================
+# =====================
 # START
-# =========================
+# =====================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
