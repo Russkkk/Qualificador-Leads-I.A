@@ -4,7 +4,11 @@ import sqlite3
 import os
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+import hashlib
 
+# -----------------------
+# APP
+# -----------------------
 app = Flask(__name__)
 CORS(app)
 
@@ -12,12 +16,52 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ---------------------------
-# Banco por cliente
-# ---------------------------
+USERS_DB = os.path.join(BASE_DIR, "users.db")
+
+# -----------------------
+# BANCO DE USUÁRIOS
+# -----------------------
+def init_users_db():
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE,
+            email TEXT UNIQUE,
+            password TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_users_db()
+
+# -----------------------
+# AUTENTICAÇÃO
+# -----------------------
+def autenticar(email, password):
+    conn = sqlite3.connect(USERS_DB)
+    cursor = conn.cursor()
+
+    senha_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    cursor.execute("""
+        SELECT client_id FROM users
+        WHERE email = ? AND password = ?
+    """, (email, senha_hash))
+
+    user = cursor.fetchone()
+    conn.close()
+
+    return user[0] if user else None
+
+# -----------------------
+# BANCO POR CLIENTE
+# -----------------------
 def get_db(client_id):
     db_path = os.path.join(DATA_DIR, f"{client_id}.db")
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -32,13 +76,11 @@ def get_db(client_id):
     conn.commit()
     return conn, cursor
 
-
-# ---------------------------
-# Treinar modelo
-# ---------------------------
+# -----------------------
+# TREINAR MODELO
+# -----------------------
 def treinar_modelo(client_id):
     conn, cursor = get_db(client_id)
-
     df = pd.read_sql("SELECT * FROM leads", conn)
 
     if df.empty:
@@ -57,10 +99,32 @@ def treinar_modelo(client_id):
 
     return model
 
+# -----------------------
+# LOGIN
+# -----------------------
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
 
-# ---------------------------
+    email = data.get("email")
+    password = data.get("password")
+
+    if not email or not password:
+        return jsonify({"erro": "email e senha obrigatórios"}), 400
+
+    client_id = autenticar(email, password)
+
+    if not client_id:
+        return jsonify({"erro": "login inválido"}), 401
+
+    return jsonify({
+        "status": "ok",
+        "client_id": client_id
+    })
+
+# -----------------------
 # PREVER LEAD
-# ---------------------------
+# -----------------------
 @app.route("/prever", methods=["POST"])
 def prever():
     data = request.get_json()
@@ -96,10 +160,9 @@ def prever():
         "lead_quente": 1 if prob >= 0.7 else 0
     })
 
-
-# ---------------------------
+# -----------------------
 # CONFIRMAR VENDA
-# ---------------------------
+# -----------------------
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
     data = request.get_json()
@@ -126,10 +189,9 @@ def confirmar_venda():
 
     return jsonify({"status": "venda_confirmada"})
 
-
-# ---------------------------
-# DASHBOARD API
-# ---------------------------
+# -----------------------
+# DASHBOARD DATA
+# -----------------------
 @app.route("/dashboard_data", methods=["GET"])
 def dashboard_data():
     client_id = request.args.get("client_id")
@@ -138,7 +200,6 @@ def dashboard_data():
         return jsonify({"erro": "client_id obrigatório"}), 400
 
     conn, cursor = get_db(client_id)
-
     df = pd.read_sql("SELECT * FROM leads", conn)
 
     total = len(df)
@@ -152,9 +213,8 @@ def dashboard_data():
         "dados": df.fillna(0).to_dict(orient="records")
     })
 
-
-# ---------------------------
+# -----------------------
 # START
-# ---------------------------
+# -----------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
