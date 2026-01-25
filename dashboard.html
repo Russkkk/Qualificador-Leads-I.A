@@ -1,127 +1,118 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Dashboard IA</title>
+  <title>Dashboard de Leads</title>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: #f4f6f8;
+      background: #0f172a;
+      color: #e5e7eb;
       padding: 20px;
     }
-
-    .container {
-      max-width: 900px;
-      margin: auto;
+    h1 {
+      margin-bottom: 10px;
     }
-
     .cards {
       display: flex;
       gap: 20px;
       margin-bottom: 30px;
     }
-
     .card {
-      flex: 1;
-      background: white;
+      background: #020617;
       padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      border-radius: 10px;
+      width: 200px;
       text-align: center;
     }
-
     canvas {
-      background: white;
+      background: #020617;
+      border-radius: 10px;
       padding: 20px;
-      border-radius: 8px;
     }
-
     input, button {
-      padding: 10px;
-      margin-bottom: 20px;
+      padding: 8px;
+      border-radius: 6px;
+      border: none;
+      margin-right: 10px;
+    }
+    button {
+      cursor: pointer;
+      background: #2563eb;
+      color: white;
     }
   </style>
 </head>
 
 <body>
-  <div class="container">
-    <h1>📊 Dashboard de Leads</h1>
 
-    <input id="client" placeholder="client_id" />
+<h1>📊 Dashboard de Leads</h1>
 
-    <select id="dias" onchange="carregar()">
-  <option value="7">Últimos 7 dias</option>
-  <option value="30" selected>Últimos 30 dias</option>
-  <option value="90">Últimos 90 dias</option>
-</select>
+<div>
+  <input id="clientId" placeholder="client_id (ex: maria_costureira)" />
+  <button onclick="carregarDashboard()">Carregar</button>
+</div>
 
-    <button onclick="carregar()">Carregar dados</button>
+<br>
 
-    <div class="cards">
-      <div class="card">
-        <h3>Total Leads</h3>
-        <p id="total">-</p>
-      </div>
-
-      <div class="card">
-        <h3>Leads Quentes</h3>
-        <p id="quentes">-</p>
-      </div>
-
-      <div class="card">
-        <h3>Leads Frios</h3>
-        <p id="frios">-</p>
-      </div>
-    </div>
-
-    <canvas id="grafico" height="120"></canvas>
+<div class="cards">
+  <div class="card">
+    <h2 id="total">0</h2>
+    <p>Total Leads</p>
   </div>
+  <div class="card">
+    <h2 id="quentes">0</h2>
+    <p>Leads Quentes</p>
+  </div>
+  <div class="card">
+    <h2 id="frios">0</h2>
+    <p>Leads Frios</p>
+  </div>
+</div>
 
-  <script>
-  let chart;
+<canvas id="grafico" width="400" height="200"></canvas>
 
-  function carregar() {
-    const client = document.getElementById("client").value;
-    const dias = document.getElementById("dias").value;
+<script>
+let chart = null;
 
-    fetch(`https://qualificador-leads-i-a.onrender.com/dashboard?client_id=${client}&dias=${dias}`)
-      .then(r => r.json())
-      .then(d => {
-        document.getElementById("total").innerText = d.total_leads;
-        document.getElementById("quentes").innerText = d.leads_quentes;
-        document.getElementById("frios").innerText = d.leads_frios;
+function carregarDashboard() {
+  const clientId = document.getElementById("clientId").value;
 
-        if (chart) chart.destroy();
+  fetch(`https://qualificador-leads-i-a.onrender.com/dashboard_data?client_id=${clientId}`)
+    .then(res => res.json())
+    .then(data => {
+      document.getElementById("total").innerText = data.total_leads;
+      document.getElementById("quentes").innerText = data.leads_quentes;
+      document.getElementById("frios").innerText = data.leads_frios;
 
-        chart = new Chart(document.getElementById("grafico"), {
-          type: "doughnut",
-          data: {
-            labels: ["Quentes", "Frios"],
-            datasets: [{
-              data: [d.leads_quentes, d.leads_frios]
-            }]
-          }
-        });
+      renderGrafico(data.leads_quentes, data.leads_frios);
+    })
+    .catch(err => alert("Erro ao carregar dashboard"));
+}
 
-        document.getElementById("grafico").onclick = function(evt) {
-          const points = chart.getElementsAtEventForMode(
-            evt,
-            'nearest',
-            { intersect: true },
-            true
-          );
+function renderGrafico(quentes, frios) {
+  const ctx = document.getElementById("grafico");
 
-          if (points.length) {
-            const index = points[0].index;
-            const tipo = chart.data.labels[index];
-            alert("Você clicou em leads: " + tipo);
-          }
-        };
-      });
+  if (chart) {
+    chart.destroy();
   }
+
+  chart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["Leads Quentes", "Leads Frios"],
+      datasets: [{
+        data: [quentes, frios],
+        backgroundColor: ["#22c55e", "#ef4444"]
+      }]
+    }
+  });
+}
 </script>
+
 </body>
 </html>
