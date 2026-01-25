@@ -96,40 +96,56 @@ def carregar_modelo(client_id):
 
 @app.route("/prever", methods=["POST"])
 def prever():
-    data = request.get_json(silent=True) or {}
+    try:
+        data = request.get_json(silent=True) or {}
 
-    client_id = data.get("client_id")
-    tempo_site = data.get("tempo_site")
-    paginas = data.get("paginas_visitadas")
-    clicou = data.get("clicou_preco")
+        client_id = data.get("client_id")
+        tempo_site = data.get("tempo_site")
+        paginas = data.get("paginas_visitadas")
+        clicou = data.get("clicou_preco")
 
-    if not client_id:
-        return jsonify({"erro": "client_id obrigatório"}), 400
+        if not client_id:
+            return jsonify({"erro": "client_id obrigatório"}), 400
 
-    criar_tabela(client_id)
+        criar_tabela(client_id)
 
-    conn = conectar_db(client_id)
-    cursor = conn.cursor()
+        conn = conectar_db(client_id)
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
-        VALUES (?, ?, ?, NULL)
-    """, (tempo_site, paginas, clicou))
+        cursor.execute("""
+            INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
+            VALUES (?, ?, ?, NULL)
+        """, (tempo_site, paginas, clicou))
 
-    conn.commit()
-    lead_id = cursor.lastrowid
-    conn.close()
+        conn.commit()
+        lead_id = cursor.lastrowid
+        conn.close()
 
-    model = carregar_modelo(client_id)
+        model = carregar_modelo(client_id)
 
-    if not model:
-        prob = 0.35
-    else:
-        X = pd.DataFrame([{
-    "tempo_site": tempo_site,
-    "paginas_visitadas": paginas,
-    "clicou_preco": clicou
-}])
+        if not model:
+            prob = 0.35
+        else:
+            X = pd.DataFrame([{
+                "tempo_site": tempo_site,
+                "paginas_visitadas": paginas,
+                "clicou_preco": clicou
+            }])
+            prob = float(model.predict_proba(X)[0][1])
+
+        return jsonify({
+            "lead_id": lead_id,
+            "probabilidade_de_compra": round(prob, 2),
+            "lead_quente": int(prob >= 0.6)
+        })
+
+    except Exception as e:
+        # 🔥 ISSO MOSTRA O ERRO REAL NO RENDER
+        return jsonify({
+            "erro": "erro interno no /prever",
+            "detalhe": str(e)
+        }), 500
+
 
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
