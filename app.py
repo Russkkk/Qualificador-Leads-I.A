@@ -5,9 +5,10 @@ import os
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 import hashlib
+import requests
 
 # =========================
-# CONFIGURAÇÃO APP
+# CONFIG
 # =========================
 app = Flask(__name__)
 CORS(app)
@@ -18,13 +19,29 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 USERS_DB = os.path.join(BASE_DIR, "users.db")
 
+ZAPI_URL = "https://api.z-api.io/instances/SEU_ID/token/SEU_TOKEN/send-text"
+WHATSAPP_DESTINO = "5518999999999"
+
 # =========================
-# BANCO DE USUÁRIOS
+# WHATSAPP
+# =========================
+def enviar_whatsapp(numero, mensagem):
+    try:
+        requests.post(
+            ZAPI_URL,
+            json={"phone": numero, "message": mensagem},
+            timeout=10
+        )
+    except:
+        pass
+
+# =========================
+# USERS DB
 # =========================
 def init_users_db():
     conn = sqlite3.connect(USERS_DB)
-    cursor = conn.cursor()
-    cursor.execute("""
+    c = conn.cursor()
+    c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id TEXT UNIQUE,
@@ -39,29 +56,24 @@ init_users_db()
 
 def autenticar(email, password):
     conn = sqlite3.connect(USERS_DB)
-    cursor = conn.cursor()
-
-    senha_hash = hashlib.sha256(password.encode()).hexdigest()
-
-    cursor.execute("""
-        SELECT client_id FROM users
-        WHERE email = ? AND password = ?
-    """, (email, senha_hash))
-
-    row = cursor.fetchone()
+    c = conn.cursor()
+    senha = hashlib.sha256(password.encode()).hexdigest()
+    c.execute(
+        "SELECT client_id FROM users WHERE email=? AND password=?",
+        (email, senha)
+    )
+    row = c.fetchone()
     conn.close()
-
     return row[0] if row else None
 
 # =========================
-# BANCO POR CLIENTE
+# DB CLIENTE
 # =========================
 def get_db(client_id):
-    db_path = os.path.join(DATA_DIR, f"{client_id}.db")
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    path = os.path.join(DATA_DIR, f"{client_id}.db")
+    conn = sqlite3.connect(path)
+    c = conn.cursor()
+    c.execute("""
         CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tempo_site INTEGER,
@@ -71,16 +83,16 @@ def get_db(client_id):
         )
     """)
     conn.commit()
-    return conn, cursor
+    return conn, c
 
 # =========================
-# TREINAMENTO IA
+# IA
 # =========================
 def treinar_modelo(client_id):
     conn, _ = get_db(client_id)
     df = pd.read_sql("SELECT * FROM leads", conn)
 
-    if df.empty:
+    if df.empty or df["virou_cliente"].isnull().all():
         return None
 
     df["virou_cliente"] = df["virou_cliente"].fillna(0)
@@ -93,7 +105,6 @@ def treinar_modelo(client_id):
 
     model = LogisticRegression()
     model.fit(X, y)
-
     return model
 
 # =========================
@@ -102,59 +113,56 @@ def treinar_modelo(client_id):
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-
-    email = data.get("email")
-    password = data.get("password")
-
-    if not email or not password:
-        return jsonify({"erro": "email e senha obrigatórios"}), 400
-
-    client_id = autenticar(email, password)
+    client_id = autenticar(data.get("email"), data.get("password"))
 
     if not client_id:
         return jsonify({"erro": "login inválido"}), 401
 
-    return jsonify({
-        "status": "ok",
-        "client_id": client_id
-    })
+    return jsonify({"client_id": client_id})
 
 # =========================
-# PREVER LEAD
+# PREVER
 # =========================
 @app.route("/prever", methods=["POST"])
 def prever():
     data = request.get_json()
-
     client_id = data.get("client_id")
-    tempo_site = data.get("tempo_site")
-    paginas = data.get("paginas_visitadas")
-    clicou = data.get("clicou_preco")
 
     if not client_id:
         return jsonify({"erro": "client_id obrigatório"}), 400
 
-    conn, cursor = get_db(client_id)
+    tempo = int(data.get("tempo_site", 0))
+    paginas = int(data.get("paginas_visitadas", 0))
+    clicou = int(data.get("clicou_preco", 0))
 
-    cursor.execute("""
+    conn, c = get_db(client_id)
+
+    c.execute("""
         INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
         VALUES (?, ?, ?, NULL)
-    """, (tempo_site, paginas, clicou))
+    """, (tempo, paginas, clicou))
     conn.commit()
-
-    lead_id = cursor.lastrowid
+    lead_id = c.lastrowid
 
     model = treinar_modelo(client_id)
 
     if model:
-        prob = model.predict_proba([[tempo_site, paginas, clicou]])[0][1]
+        prob = float(model.predict_proba([[tempo, paginas, clicou]])[0][1])
     else:
         prob = 0.35
 
+    lead_quente = prob >= 0.7
+
+    if lead_quente:
+        enviar_whatsapp(
+            WHATSAPP_DESTINO,
+            f"🔥 Lead quente!\nTempo: {tempo}s\nPáginas: {paginas}\nClicou preço: {clicou}"
+        )
+
     return jsonify({
         "lead_id": lead_id,
-        "probabilidade_de_compra": round(float(prob), 2),
-        "lead_quente": 1 if prob >= 0.7 else 0
+        "probabilidade": round(prob, 2),
+        "lead_quente": int(lead_quente)
     })
 
 # =========================
@@ -163,46 +171,40 @@ def prever():
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
     data = request.get_json()
-
     client_id = data.get("client_id")
     lead_id = data.get("lead_id")
 
     if not client_id or not lead_id:
         return jsonify({"erro": "client_id e lead_id obrigatórios"}), 400
 
-    conn, cursor = get_db(client_id)
-
-    cursor.execute("UPDATE leads SET virou_cliente = 1 WHERE id = ?", (lead_id,))
-    cursor.execute("UPDATE leads SET virou_cliente = 0 WHERE virou_cliente IS NULL")
-
+    conn, c = get_db(client_id)
+    c.execute("UPDATE leads SET virou_cliente = 1 WHERE id = ?", (lead_id,))
     conn.commit()
 
-    treinar_modelo(client_id)
+    enviar_whatsapp(
+        WHATSAPP_DESTINO,
+        f"✅ Venda confirmada! Lead #{lead_id}"
+    )
 
-    return jsonify({"status": "venda_confirmada"})
+    return jsonify({"status": "ok"})
 
 # =========================
 # DASHBOARD
 # =========================
-@app.route("/dashboard_data", methods=["GET"])
+@app.route("/dashboard_data")
 def dashboard_data():
     client_id = request.args.get("client_id")
-
     if not client_id:
         return jsonify({"erro": "client_id obrigatório"}), 400
 
     conn, _ = get_db(client_id)
     df = pd.read_sql("SELECT * FROM leads", conn)
 
-    total = len(df)
-    quentes = len(df[df["virou_cliente"] == 1])
-    frios = total - quentes
-
     return jsonify({
-        "total_leads": total,
-        "leads_quentes": quentes,
-        "leads_frios": frios,
-        "dados": df.fillna(0).to_dict(orient="records")
+        "total": len(df),
+        "quentes": int((df["virou_cliente"] == 1).sum()),
+        "frios": int((df["virou_cliente"] != 1).sum()),
+        "dados": df.fillna(0).to_dict("records")
     })
 
 # =========================
