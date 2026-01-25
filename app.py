@@ -125,15 +125,11 @@ def prever():
     if not model:
         prob = 0.35
     else:
-        X = [[tempo_site, paginas, clicou]]
-        prob = float(model.predict_proba(X)[0][1])
-
-    return jsonify({
-        "lead_id": lead_id,
-        "probabilidade_de_compra": round(prob, 2),
-        "lead_quente": int(prob >= 0.6)
-    })
-
+        X = pd.DataFrame([{
+    "tempo_site": tempo_site,
+    "paginas_visitadas": paginas,
+    "clicou_preco": clicou
+}])
 
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
