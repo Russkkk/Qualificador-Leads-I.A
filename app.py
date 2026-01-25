@@ -6,9 +6,9 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 import hashlib
 
-# -----------------------
-# APP
-# -----------------------
+# =========================
+# CONFIGURAÇÃO APP
+# =========================
 app = Flask(__name__)
 CORS(app)
 
@@ -18,9 +18,9 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 USERS_DB = os.path.join(BASE_DIR, "users.db")
 
-# -----------------------
+# =========================
 # BANCO DE USUÁRIOS
-# -----------------------
+# =========================
 def init_users_db():
     conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
@@ -37,9 +37,6 @@ def init_users_db():
 
 init_users_db()
 
-# -----------------------
-# AUTENTICAÇÃO
-# -----------------------
 def autenticar(email, password):
     conn = sqlite3.connect(USERS_DB)
     cursor = conn.cursor()
@@ -51,14 +48,14 @@ def autenticar(email, password):
         WHERE email = ? AND password = ?
     """, (email, senha_hash))
 
-    user = cursor.fetchone()
+    row = cursor.fetchone()
     conn.close()
 
-    return user[0] if user else None
+    return row[0] if row else None
 
-# -----------------------
+# =========================
 # BANCO POR CLIENTE
-# -----------------------
+# =========================
 def get_db(client_id):
     db_path = os.path.join(DATA_DIR, f"{client_id}.db")
     conn = sqlite3.connect(db_path)
@@ -76,11 +73,11 @@ def get_db(client_id):
     conn.commit()
     return conn, cursor
 
-# -----------------------
-# TREINAR MODELO
-# -----------------------
+# =========================
+# TREINAMENTO IA
+# =========================
 def treinar_modelo(client_id):
-    conn, cursor = get_db(client_id)
+    conn, _ = get_db(client_id)
     df = pd.read_sql("SELECT * FROM leads", conn)
 
     if df.empty:
@@ -99,9 +96,9 @@ def treinar_modelo(client_id):
 
     return model
 
-# -----------------------
+# =========================
 # LOGIN
-# -----------------------
+# =========================
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -122,9 +119,9 @@ def login():
         "client_id": client_id
     })
 
-# -----------------------
+# =========================
 # PREVER LEAD
-# -----------------------
+# =========================
 @app.route("/prever", methods=["POST"])
 def prever():
     data = request.get_json()
@@ -160,9 +157,9 @@ def prever():
         "lead_quente": 1 if prob >= 0.7 else 0
     })
 
-# -----------------------
+# =========================
 # CONFIRMAR VENDA
-# -----------------------
+# =========================
 @app.route("/confirmar_venda", methods=["POST"])
 def confirmar_venda():
     data = request.get_json()
@@ -175,13 +172,8 @@ def confirmar_venda():
 
     conn, cursor = get_db(client_id)
 
-    cursor.execute("""
-        UPDATE leads SET virou_cliente = 1 WHERE id = ?
-    """, (lead_id,))
-
-    cursor.execute("""
-        UPDATE leads SET virou_cliente = 0 WHERE virou_cliente IS NULL
-    """)
+    cursor.execute("UPDATE leads SET virou_cliente = 1 WHERE id = ?", (lead_id,))
+    cursor.execute("UPDATE leads SET virou_cliente = 0 WHERE virou_cliente IS NULL")
 
     conn.commit()
 
@@ -189,9 +181,9 @@ def confirmar_venda():
 
     return jsonify({"status": "venda_confirmada"})
 
-# -----------------------
-# DASHBOARD DATA
-# -----------------------
+# =========================
+# DASHBOARD
+# =========================
 @app.route("/dashboard_data", methods=["GET"])
 def dashboard_data():
     client_id = request.args.get("client_id")
@@ -199,7 +191,7 @@ def dashboard_data():
     if not client_id:
         return jsonify({"erro": "client_id obrigatório"}), 400
 
-    conn, cursor = get_db(client_id)
+    conn, _ = get_db(client_id)
     df = pd.read_sql("SELECT * FROM leads", conn)
 
     total = len(df)
@@ -213,8 +205,8 @@ def dashboard_data():
         "dados": df.fillna(0).to_dict(orient="records")
     })
 
-# -----------------------
+# =========================
 # START
-# -----------------------
+# =========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
