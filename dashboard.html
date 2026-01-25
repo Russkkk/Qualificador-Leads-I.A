@@ -164,7 +164,7 @@ function atualizarTabela(filtro) {
       <td>${l.tempo_site}</td>
       <td>${l.paginas_visitadas}</td>
       <td>${l.clicou_preco ? "Sim" : "Não"}</td>
-      <td>${l.virou_cliente ? "🔥 Quente" : "❄️ Frio"}</td>
+      <td>${l.virou_cliente === 1 ? \"🔥 Quente\" : (l.virou_cliente === 0 ? \"❄️ Frio\" : \"⏳ Pendente\")}</td>
     `;
 
     tr.onclick = () => {
