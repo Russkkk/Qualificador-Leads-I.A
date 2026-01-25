@@ -7,9 +7,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from sklearn.linear_model import LogisticRegression
 
-# =========================
-# CONFIGURAÇÕES BÁSICAS
-# =========================
+# ======================
+# APP CONFIG
+# ======================
 
 app = Flask(__name__)
 CORS(app)
@@ -17,20 +17,20 @@ CORS(app)
 os.makedirs("data", exist_ok=True)
 os.makedirs("models", exist_ok=True)
 
+# ======================
+# DATABASE
+# ======================
 
-# =========================
-# FUNÇÕES AUXILIARES
-# =========================
+def db_path(client_id):
+    return f"data/{client_id}.db"
 
-def get_db(client_id):
-    path = f"data/{client_id}.db"
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
+
+def conectar_db(client_id):
+    return sqlite3.connect(db_path(client_id))
 
 
 def criar_tabela(client_id):
-    conn = get_db(client_id)
+    conn = conectar_db(client_id)
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -46,17 +46,32 @@ def criar_tabela(client_id):
     conn.commit()
     conn.close()
 
+# ======================
+# MODELO
+# ======================
 
 def treinar_modelo(client_id):
-    conn = get_db(client_id)
+    conn = conectar_db(client_id)
+    cursor = conn.cursor()
+
+    # 🔥 FORÇA LEADS NÃO CONFIRMADOS A VIRAREM 0
+    cursor.execute("""
+        UPDATE leads
+        SET virou_cliente = 0
+        WHERE virou_cliente IS NULL
+    """)
+    conn.commit()
+
     df = pd.read_sql("""
         SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
         FROM leads
-        WHERE virou_cliente IS NOT NULL
+        WHERE virou_cliente IN (0, 1)
     """, conn)
+
     conn.close()
 
-    if len(df) < 2:
+    # precisa de pelo menos 2 classes
+    if df["virou_cliente"].nunique() < 2:
         return None
 
     X = df[["tempo_site", "paginas_visitadas", "clicou_preco"]]
@@ -70,15 +85,14 @@ def treinar_modelo(client_id):
 
 
 def carregar_modelo(client_id):
-    path = f"models/{client_id}.joblib"
-    if os.path.exists(path):
-        return joblib.load(path)
+    caminho = f"models/{client_id}.joblib"
+    if os.path.exists(caminho):
+        return joblib.load(caminho)
     return None
 
-
-# =========================
+# ======================
 # ROTAS
-# =========================
+# ======================
 
 @app.route("/prever", methods=["POST"])
 def prever():
@@ -86,24 +100,23 @@ def prever():
 
     client_id = data.get("client_id")
     tempo_site = data.get("tempo_site")
-    paginas_visitadas = data.get("paginas_visitadas")
-    clicou_preco = data.get("clicou_preco")
+    paginas = data.get("paginas_visitadas")
+    clicou = data.get("clicou_preco")
 
     if not client_id:
         return jsonify({"erro": "client_id obrigatório"}), 400
 
     criar_tabela(client_id)
 
-    conn = get_db(client_id)
+    conn = conectar_db(client_id)
     cursor = conn.cursor()
 
     cursor.execute("""
         INSERT INTO leads (tempo_site, paginas_visitadas, clicou_preco, virou_cliente)
         VALUES (?, ?, ?, NULL)
-    """, (tempo_site, paginas_visitadas, clicou_preco))
+    """, (tempo_site, paginas, clicou))
 
     conn.commit()
-
     lead_id = cursor.lastrowid
     conn.close()
 
@@ -112,7 +125,7 @@ def prever():
     if not model:
         prob = 0.35
     else:
-        X = [[tempo_site, paginas_visitadas, clicou_preco]]
+        X = [[tempo_site, paginas, clicou]]
         prob = float(model.predict_proba(X)[0][1])
 
     return jsonify({
@@ -134,13 +147,14 @@ def confirmar_venda():
 
     criar_tabela(client_id)
 
-    conn = get_db(client_id)
+    conn = conectar_db(client_id)
     cursor = conn.cursor()
 
-    cursor.execute(
-        "UPDATE leads SET virou_cliente = 1 WHERE id = ?",
-        (lead_id,)
-    )
+    cursor.execute("""
+        UPDATE leads
+        SET virou_cliente = 1
+        WHERE id = ?
+    """, (lead_id,))
 
     conn.commit()
     conn.close()
@@ -149,10 +163,9 @@ def confirmar_venda():
 
     return jsonify({"status": "venda_confirmada"})
 
-
-# =========================
+# ======================
 # START
-# =========================
+# ======================
 
 if __name__ == "__main__":
     app.run(debug=True)
