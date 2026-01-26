@@ -10,6 +10,7 @@ from psycopg2.extras import RealDictCursor
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # =========================================================
@@ -446,6 +447,101 @@ def debug_model():
             )
     finally:
         conn.close()
+        
+        
+@app.get("/recalc_pending")
+def recalc_pending():
+    client_id = request.args.get("client_id", "").strip()
+    limit = int(request.args.get("limit", "200"))  # quantos pendentes recalcular por chamada (pra não pesar)
+    if not client_id:
+        return jsonify({"error": "client_id é obrigatório"}), 400
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # 1) Buscar rotulados (0/1) para treino
+    cur.execute("""
+        SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
+        FROM leads
+        WHERE client_id = %s
+          AND virou_cliente IN (0, 1)
+        ORDER BY id DESC
+        LIMIT 2000
+    """, (client_id,))
+    labeled = cur.fetchall()
+
+    if len(labeled) < 4:
+        conn.close()
+        return jsonify({
+            "ok": False,
+            "reason": "Poucos exemplos rotulados. Rotule no mínimo 4 (2 de cada classe).",
+            "labeled_count": len(labeled)
+        }), 400
+
+    y = np.array([row[3] for row in labeled], dtype=float)
+    # precisa ter as duas classes
+    if len(set(y.tolist())) < 2:
+        conn.close()
+        return jsonify({
+            "ok": False,
+            "reason": "Só existe 1 classe rotulada (apenas 0 ou apenas 1).",
+            "classes": sorted(list(set(y.tolist())))
+        }), 400
+
+    X = np.array([[row[0], row[1], row[2]] for row in labeled], dtype=float)
+
+    # 2) Treinar modelo
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+
+    model = LogisticRegression(max_iter=200)
+    model.fit(Xs, y)
+
+    # 3) Buscar pendentes para recalcular
+    cur.execute("""
+        SELECT id, tempo_site, paginas_visitadas, clicou_preco
+        FROM leads
+        WHERE client_id = %s
+          AND (virou_cliente IS NULL OR virou_cliente = -1)
+        ORDER BY id DESC
+        LIMIT %s
+    """, (client_id, limit))
+    pending = cur.fetchall()
+
+    if not pending:
+        conn.close()
+        return jsonify({
+            "ok": True,
+            "updated": 0,
+            "reason": "Não há leads pendentes para recalcular."
+        }), 200
+
+    # 4) Recalcular e atualizar
+    ids = [p[0] for p in pending]
+    Xp = np.array([[p[1], p[2], p[3]] for p in pending], dtype=float)
+    Xps = scaler.transform(Xp)
+
+    probs = model.predict_proba(Xps)[:, 1]  # prob de classe 1
+
+    # update em lote
+    updates = list(zip([float(p) for p in probs], ids))
+    cur.executemany("""
+        UPDATE leads
+        SET probabilidade = %s
+        WHERE id = %s
+    """, updates)
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "updated": len(ids),
+        "limit": limit,
+        "min_prob": float(np.min(probs)),
+        "max_prob": float(np.max(probs)),
+        "sample": [{"id": ids[i], "prob": float(probs[i])} for i in range(min(5, len(ids)))]
+    }), 200
 
 
 if __name__ == "__main__":
