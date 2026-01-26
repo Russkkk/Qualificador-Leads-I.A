@@ -31,6 +31,7 @@
     header{
       display:flex; align-items:center; justify-content:space-between;
       gap:14px; margin-bottom:16px;
+      flex-wrap: wrap;
     }
     h1{ margin:0; font-size:20px; letter-spacing:-.2px; }
     .sub{ color:var(--muted); font-size:12px; margin-top:4px; }
@@ -49,7 +50,7 @@
       outline:none;
       min-width: 220px;
     }
-    select{ min-width: 180px; }
+    select{ min-width: 200px; }
 
     .btn{
       border:none; cursor:pointer;
@@ -71,7 +72,7 @@
     .btnSmall{
       padding: 7px 10px;
       border-radius: 10px;
-      font-weight:700;
+      font-weight:800;
       font-size: 12px;
     }
     .btnGreen{ background: rgba(34,197,94,.18); border:1px solid rgba(34,197,94,.35); color:#dcfce7; }
@@ -96,7 +97,7 @@
 
     .grid{
       display:grid;
-      grid-template-columns: 1fr 1.65fr;
+      grid-template-columns: 1fr 1.9fr;
       gap:14px;
       align-items:start;
     }
@@ -131,10 +132,11 @@
       font-size: 13px;
       text-align:left;
       vertical-align: middle;
+      white-space: nowrap;
     }
     th{
       color: var(--muted);
-      font-weight: 600;
+      font-weight: 700;
       background: rgba(2,6,23,.55);
     }
     tr:hover{ background: rgba(148,163,184,.06); }
@@ -161,19 +163,19 @@
       padding: 12px 14px;
       border-radius: 12px;
       border:1px solid rgba(148,163,184,.18);
-      background: rgba(2,6,23,.75);
+      background: rgba(2,6,23,.78);
       box-shadow: var(--shadow);
       color: var(--text);
       font-size: 13px;
       display:none;
-      max-width: 380px;
+      max-width: 420px;
       line-height: 1.35;
     }
     .toast.show{ display:block; }
     .toast.success{ border-color: rgba(34,197,94,.35); }
     .toast.error{ border-color: rgba(239,68,68,.35); }
 
-    @media (max-width: 980px){
+    @media (max-width: 1100px){
       .grid{ grid-template-columns: 1fr; }
     }
   </style>
@@ -183,7 +185,7 @@
   <header>
     <div>
       <h1>📊 Dashboard — Qualificador de Leads IA</h1>
-      <div class="sub">Filtro, busca, exportação CSV e ações rápidas</div>
+      <div class="sub">Leads, probabilidade, ações e exportação CSV</div>
     </div>
 
     <div class="topbar">
@@ -207,7 +209,7 @@
       <h3>Status dos leads</h3>
       <canvas id="chart"></canvas>
       <div class="muted" style="margin-top:10px;font-size:12px;">
-        Dica: “Pendentes” são leads ainda sem confirmação (virou_cliente = -1).
+        “Pendentes” = ainda sem decisão (virou_cliente = -1).
       </div>
     </div>
 
@@ -222,7 +224,7 @@
           <option value="negados">Negados</option>
         </select>
 
-        <input id="busca" class="input search" placeholder="Buscar por ID (ex: 12)..." />
+        <input id="busca" class="input search" placeholder="Buscar por ID, nome, telefone ou email..." />
       </div>
 
       <div style="overflow:auto;">
@@ -230,11 +232,15 @@
           <thead>
             <tr>
               <th style="width:70px;">ID</th>
+              <th>Nome</th>
+              <th>Telefone</th>
+              <th>Email</th>
+              <th>Prob (%)</th>
               <th>Tempo (s)</th>
               <th>Páginas</th>
               <th>Clicou preço</th>
               <th>Status</th>
-              <th style="width:220px;">Ações</th>
+              <th style="width:260px;">Ações</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
@@ -242,7 +248,7 @@
       </div>
 
       <div class="muted" style="margin-top:10px;font-size:12px;">
-        * Export CSV usa os dados já carregados do endpoint <code>/dashboard_data</code>. :contentReference[oaicite:2]{index=2}
+        Dados vêm de <code>/dashboard_data</code> no backend Python. 
       </div>
     </div>
   </section>
@@ -250,7 +256,9 @@
   <div id="toast" class="toast"></div>
 
 <script>
-  const API_BASE = "https://qualificador-leads-i-a.onrender.com"; // seu backend Python
+  // ✅ Backend Python (Render Web Service)
+  const API_BASE = "https://qualificador-leads-i-a.onrender.com";
+
   const elClient = document.getElementById("clientId");
   const elFiltro = document.getElementById("filtro");
   const elBusca  = document.getElementById("busca");
@@ -276,11 +284,19 @@
     return { label:"⏳ Pendente", cls:"tPen" };
   }
 
-  function computeKPIs(){
-    const total = leads.length;
-    const conv = leads.filter(l => l.virou_cliente === 1).length;
-    const neg  = leads.filter(l => l.virou_cliente === 0).length;
-    const pen  = leads.filter(l => l.virou_cliente !== 1 && l.virou_cliente !== 0).length;
+  function fmtProb(p){
+    if (p === null || p === undefined || p === "") return "-";
+    const num = Number(p);
+    if (Number.isNaN(num)) return "-";
+    return Math.round(num * 100) + "%";
+  }
+
+  function computeKPIs(meta){
+    // meta vem do backend e já inclui convertidos/negados/pendentes. 
+    const total = Number(meta.total_leads ?? leads.length) || leads.length;
+    const conv  = Number(meta.convertidos ?? 0) || 0;
+    const neg   = Number(meta.negados ?? 0) || 0;
+    const pen   = Number(meta.pendentes ?? 0) || 0;
 
     document.getElementById("kpiTotal").textContent = total;
     document.getElementById("kpiConv").textContent  = conv;
@@ -301,33 +317,51 @@
       type: "doughnut",
       data: {
         labels: ["Convertidos", "Pendentes", "Negados"],
-        datasets: [{
-          data: [conv, pen, neg]
-        }]
+        datasets: [{ data: [conv, pen, neg] }]
       },
       options: {
-        plugins: {
-          legend: { labels: { color: "#cbd5e1" } }
-        }
+        plugins: { legend: { labels: { color: "#cbd5e1" } } }
       }
     });
   }
 
+  function normalizeLead(x){
+    return {
+      ...x,
+      id: Number(x.id),
+      virou_cliente: Number(x.virou_cliente),
+      clicou_preco: Number(x.clicou_preco),
+      paginas_visitadas: Number(x.paginas_visitadas),
+      tempo_site: Number(x.tempo_site),
+      probabilidade: (x.probabilidade === null || x.probabilidade === undefined) ? null : Number(x.probabilidade),
+      nome: x.nome || "",
+      telefone: x.telefone || "",
+      email_lead: x.email_lead || ""
+    };
+  }
+
   function applyFilters(){
     const filtro = elFiltro.value;
-    const q = elBusca.value.trim();
+    const q = elBusca.value.trim().toLowerCase();
 
     let arr = [...leads];
 
-    // filtro por status
+    // filtro status
     if (filtro === "convertidos") arr = arr.filter(l => l.virou_cliente === 1);
     if (filtro === "negados")     arr = arr.filter(l => l.virou_cliente === 0);
     if (filtro === "pendentes")   arr = arr.filter(l => l.virou_cliente !== 1 && l.virou_cliente !== 0);
 
-    // busca por ID
+    // busca por id/nome/telefone/email
     if (q){
-      const id = parseInt(q, 10);
-      if (!Number.isNaN(id)) arr = arr.filter(l => l.id === id);
+      arr = arr.filter(l => {
+        const hay = [
+          String(l.id),
+          l.nome,
+          l.telefone,
+          l.email_lead
+        ].join(" ").toLowerCase();
+        return hay.includes(q);
+      });
     }
 
     renderTable(arr);
@@ -336,23 +370,25 @@
   function renderTable(arr){
     elTbody.innerHTML = "";
     if (!arr.length){
-      elTbody.innerHTML = `<tr><td colspan="6" class="muted">Nenhum lead encontrado.</td></tr>`;
+      elTbody.innerHTML = `<tr><td colspan="10" class="muted">Nenhum lead encontrado.</td></tr>`;
       return;
     }
 
     arr.forEach(l => {
       const st = statusInfo(l.virou_cliente);
-
-      // ações: confirmar venda (backend tem endpoint) e negar (backend NÃO tem ainda)
       const canConfirm = l.virou_cliente !== 1;
-      const canNegar   = true; // vai ficar "desabilitado" até você criar endpoint
+      const canNegar   = l.virou_cliente !== 0;
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${l.id}</td>
-        <td>${l.tempo_site ?? "-"}</td>
-        <td>${l.paginas_visitadas ?? "-"}</td>
-        <td>${(l.clicou_preco === 1) ? "Sim" : "Não"}</td>
+        <td title="${l.nome}">${l.nome || "-"}</td>
+        <td>${l.telefone || "-"}</td>
+        <td title="${l.email_lead}">${l.email_lead || "-"}</td>
+        <td>${fmtProb(l.probabilidade)}</td>
+        <td>${Number.isFinite(l.tempo_site) ? l.tempo_site : "-"}</td>
+        <td>${Number.isFinite(l.paginas_visitadas) ? l.paginas_visitadas : "-"}</td>
+        <td>${l.clicou_preco === 1 ? "Sim" : "Não"}</td>
         <td><span class="tag ${st.cls}">${st.label}</span></td>
         <td style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btnSecondary btnSmall btnGreen ${canConfirm ? "" : "btnDisabled"}"
@@ -361,10 +397,15 @@
             Confirmar venda
           </button>
 
-          <button class="btnSecondary btnSmall btnRed btnDisabled"
-                  title="Upgrade: criar endpoint /negar_venda para marcar virou_cliente=0"
-                  disabled>
+          <button class="btnSecondary btnSmall btnRed ${canNegar ? "" : "btnDisabled"}"
+                  ${canNegar ? "" : "disabled"}
+                  onclick="negarVenda(${l.id})">
             Marcar negado
+          </button>
+
+          <button class="btnSecondary btnSmall"
+                  onclick="copiarLead(${l.id})">
+            Copiar
           </button>
         </td>
       `;
@@ -378,7 +419,6 @@
       showToast("Informe o <b>client_id</b> para carregar os dados.", "error");
       return;
     }
-
     localStorage.setItem("client_id", clientId);
 
     try{
@@ -389,18 +429,12 @@
       }
       const data = await res.json();
 
-      // Seu backend retorna os leads em data.dados. :contentReference[oaicite:3]{index=3}
-      leads = (data.dados || []).map(x => ({
-        ...x,
-        // garante numérico
-        virou_cliente: Number(x.virou_cliente)
-      }));
-
-      computeKPIs();
+      leads = (data.dados || []).map(normalizeLead);
+      computeKPIs(data);
       applyFilters();
-      showToast("Dados carregados com sucesso ✅");
+      showToast("Dados carregados ✅");
     } catch (e){
-      showToast("Erro ao carregar dados. Verifique o backend no Render.", "error");
+      showToast("Erro ao carregar dados. Confira o backend (Render) e CORS.", "error");
     }
   }
 
@@ -414,17 +448,57 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id: clientId, lead_id: leadId })
       });
-
       if (!res.ok){
         const t = await res.text();
         throw new Error(t || "Falha ao confirmar");
       }
-
       showToast(`Venda confirmada para o lead <b>#${leadId}</b> ✅`);
-      // recarrega para atualizar status
       await carregar();
     } catch (e){
       showToast("Erro ao confirmar venda. Veja logs do Render.", "error");
+    }
+  }
+
+  async function negarVenda(leadId){
+    const clientId = elClient.value.trim();
+    if (!clientId) return;
+
+    try{
+      const res = await fetch(`${API_BASE}/negar_venda`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, lead_id: leadId })
+      });
+      if (!res.ok){
+        const t = await res.text();
+        throw new Error(t || "Falha ao negar");
+      }
+      showToast(`Lead <b>#${leadId}</b> marcado como negado ❌`);
+      await carregar();
+    } catch (e){
+      showToast("Erro ao marcar negado. Veja logs do Render.", "error");
+    }
+  }
+
+  async function copiarLead(leadId){
+    const l = leads.find(x => x.id === leadId);
+    if (!l) return;
+
+    const payload =
+`Lead #${l.id}
+Nome: ${l.nome || "-"}
+Telefone: ${l.telefone || "-"}
+Email: ${l.email_lead || "-"}
+Prob: ${fmtProb(l.probabilidade)}
+Tempo: ${l.tempo_site ?? "-"}s
+Páginas: ${l.paginas_visitadas ?? "-"}
+Clicou preço: ${l.clicou_preco === 1 ? "Sim" : "Não"}`;
+
+    try{
+      await navigator.clipboard.writeText(payload);
+      showToast("Lead copiado 📋");
+    } catch {
+      showToast("Não consegui copiar automaticamente (permissão do navegador).", "error");
     }
   }
 
@@ -434,8 +508,22 @@
       return;
     }
 
-    const headers = ["id","tempo_site","paginas_visitadas","clicou_preco","virou_cliente"];
-    const rows = leads.map(l => headers.map(h => (l[h] ?? "")).join(","));
+    const headers = [
+      "id","nome","telefone","email_lead","probabilidade",
+      "tempo_site","paginas_visitadas","clicou_preco","virou_cliente","created_at"
+    ];
+
+    const esc = (v) => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      // escapa vírgulas e aspas
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+        return '"' + s.replaceAll('"', '""') + '"';
+      }
+      return s;
+    };
+
+    const rows = leads.map(l => headers.map(h => esc(l[h])).join(","));
     const csv = [headers.join(","), ...rows].join("\n");
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -457,15 +545,13 @@
     localStorage.removeItem("client_id");
     elClient.value = "";
     leads = [];
-    computeKPIs();
-    applyFilters();
+    renderTable([]);
     showToast("client_id removido do navegador.");
   });
 
   elFiltro.addEventListener("change", applyFilters);
   elBusca.addEventListener("input", applyFilters);
 
-  // auto-load se tiver client_id salvo
   if (saved) carregar();
 </script>
 </body>
