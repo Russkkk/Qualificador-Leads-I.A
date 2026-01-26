@@ -20,6 +20,7 @@ DB_PATH = os.environ.get("DB_PATH", "/var/data/users.db")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+sqlite3.connect(DB_PATH)
 
 USERS_DB = os.path.join(BASE_DIR, "users.db")
 
