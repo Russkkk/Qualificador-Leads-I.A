@@ -3,21 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>LeadRank — Dashboard</title>
+  <title>LeadRank — App</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root{
       --bg: #0b1220;
-      --panel: rgba(255,255,255,0.06);
       --border: rgba(255,255,255,0.10);
       --text: rgba(255,255,255,0.92);
       --muted: rgba(255,255,255,0.65);
       --muted2: rgba(255,255,255,0.45);
       --shadow: 0 10px 30px rgba(0,0,0,.35);
       --radius: 16px;
-      --hot: #22c55e;
-      --warm: #f59e0b;
-      --cold: #94a3b8;
       --danger: #ef4444;
       --primary: #60a5fa;
       --primary2: #2563eb;
@@ -76,9 +72,18 @@
     .btn:active{ transform: scale(0.98); }
     .btn.primary{ background: linear-gradient(135deg, rgba(96,165,250,0.95), rgba(37,99,235,0.95)); border-color: rgba(0,0,0,0); }
     .btn.primary:hover{ filter: brightness(1.05); }
-    .btn.danger{ background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.25); }
-    .btn.good{ background: rgba(34,197,94,0.14); border-color: rgba(34,197,94,0.25); }
     .btn.small{ height: 32px; border-radius: 10px; padding: 0 10px; font-size: 13px; }
+    .tabs{ display:flex; gap: 8px; padding: 10px 0 0; }
+    .tab{
+      height: 34px; padding: 0 12px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.85);
+      cursor: pointer;
+      display:inline-flex; align-items:center; gap: 8px;
+      user-select:none;
+    }
+    .tab.active{ background: rgba(96,165,250,0.18); border-color: rgba(96,165,250,0.35); }
     .grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 14px; margin-top: 16px; }
     .card{
       border: 1px solid var(--border);
@@ -103,6 +108,14 @@
     .panelHeader .sub{ color: var(--muted); font-size: 12px; margin-top: 2px; }
     .panelHeaderLeft{ display:flex; flex-direction:column; gap:2px; }
     .panelHeaderRight{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; justify-content:flex-end; }
+    .pill{
+      display:inline-flex; align-items:center; gap: 6px;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px; color: rgba(255,255,255,0.85);
+      white-space: nowrap;
+    }
     .split{ display:grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; padding: 14px; }
     .split > .card{ box-shadow:none; }
     .chartWrap{ height: 260px; }
@@ -115,26 +128,12 @@
       backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border);
       font-size: 12px; color: rgba(255,255,255,0.75);
-      padding: 12px 10px; text-align: left; letter-spacing: 0.2px;
+      padding: 12px 10px; text-align: left;
     }
     tbody td{ border-bottom: 1px solid rgba(255,255,255,0.08); padding: 12px 10px; font-size: 13px; vertical-align: middle; }
     tbody tr{ background: rgba(255,255,255,0.03); cursor: pointer; transition: background .12s ease; }
     tbody tr:hover{ background: rgba(255,255,255,0.06); }
     .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; color: var(--muted); }
-    .pill{
-      display:inline-flex; align-items:center; gap: 6px;
-      padding: 6px 10px; border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.14);
-      background: rgba(255,255,255,0.06);
-      font-size: 12px; color: rgba(255,255,255,0.85);
-      white-space: nowrap;
-    }
-    .pill.hot{ border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.12); }
-    .pill.warm{ border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.12); }
-    .pill.cold{ border-color: rgba(148,163,184,0.35); background: rgba(148,163,184,0.10); }
-    .pill.pending{ border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.10); }
-    .pill.converted{ border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.10); }
-    .pill.denied{ border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.10); }
     .scoreWrap{ display:flex; align-items:center; gap: 10px; }
     .bar{
       width: 120px; height: 10px; border-radius: 999px;
@@ -143,8 +142,14 @@
     }
     .bar > div{ height: 100%; width: 0%; background: linear-gradient(90deg, rgba(96,165,250,0.85), rgba(34,197,94,0.85)); }
     .actions{ display:flex; gap: 8px; justify-content:flex-end; }
-    .link{ color: rgba(96,165,250,0.95); text-decoration: none; }
-    .link:hover{ text-decoration: underline; }
+    .btn.good{ background: rgba(34,197,94,0.14); border-color: rgba(34,197,94,0.25); }
+    .btn.danger{ background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.25); }
+    .pill.hot{ border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.12); }
+    .pill.warm{ border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.12); }
+    .pill.cold{ border-color: rgba(148,163,184,0.35); background: rgba(148,163,184,0.10); }
+    .pill.pending{ border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.10); }
+    .pill.converted{ border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.10); }
+    .pill.denied{ border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.10); }
     .toast{
       position: fixed; left: 50%; transform: translateX(-50%);
       bottom: 18px;
@@ -157,6 +162,7 @@
       z-index: 999;
       max-width: 92vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* Drawer */
     .drawerOverlay{ position: fixed; inset: 0; background: rgba(0,0,0,0.55); display:none; z-index: 200; }
     .drawer{
       position: fixed; top: 0; right: 0; height: 100%;
@@ -185,6 +191,8 @@
       border-top: 1px solid rgba(255,255,255,0.12);
       display:flex; gap: 10px; justify-content:flex-end; flex-wrap:wrap;
     }
+    .hidden{ display:none !important; }
+
     @media (max-width: 980px){
       .kpi{ grid-column: span 6; }
       .split{ grid-template-columns: 1fr; }
@@ -194,12 +202,11 @@
       body{ padding: 14px; }
       .kpi{ grid-column: span 12; }
       .controls{ justify-content: stretch; }
-      .input{ width: 100%; }
+      .input, .select{ width: 100%; }
       .topbar{ top: 10px; }
     }
   </style>
 </head>
-
 <body>
   <div class="container">
     <div class="topbar">
@@ -207,12 +214,19 @@
         <div class="logo"></div>
         <div>
           <h1>LeadRank</h1>
-          <p>Dashboard — priorize quem vai comprar</p>
+          <p>priorize quem vai comprar</p>
+          <div class="tabs">
+            <button class="tab active" id="tabDash">📊 Dashboard</button>
+            <button class="tab" id="tabInsights">📈 Insights</button>
+          </div>
         </div>
       </div>
 
       <div class="controls">
-        <input class="input" id="clientId" placeholder="client_id (ex: teste1)" />
+        <select class="select" id="workspace"></select>
+        <button class="btn" id="btnAddWs">+ Workspace</button>
+        <button class="btn" id="btnDelWs" title="Remove o workspace selecionado">Remover</button>
+
         <input class="input" id="search" placeholder="buscar por nome/email/telefone" />
         <select class="select" id="view">
           <option value="ranking">Ranking</option>
@@ -220,96 +234,152 @@
           <option value="rotulados">Rotulados</option>
           <option value="todos">Todos</option>
         </select>
+
         <button class="btn primary" id="btnCarregar">Carregar</button>
         <button class="btn" id="btnRecalc" title="Recalcula probabilidades dos pendentes">Recalcular</button>
         <button class="btn" id="btnAutoTh" title="Calcula e salva o melhor threshold para este cliente">Auto threshold</button>
+        <button class="btn" id="btnDemo" title="Gera dados realistas para demonstração (protege com DEMO_KEY)">Gerar demo</button>
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card kpi">
-        <div class="value" id="kpiTotal">0</div>
-        <div class="label">Total de leads (últimos 200)</div>
-        <div class="hint" id="kpiUpdated">—</div>
-      </div>
-      <div class="card kpi">
-        <div class="value" id="kpiHot">0</div>
-        <div class="label">🔥 Quentes (score alto)</div>
-        <div class="hint">Recomendação de prioridade</div>
-      </div>
-      <div class="card kpi">
-        <div class="value" id="kpiWarm">0</div>
-        <div class="label">🟡 Mornos</div>
-        <div class="hint">Valem follow-up</div>
-      </div>
-      <div class="card kpi">
-        <div class="value" id="kpiCold">0</div>
-        <div class="label">❄️ Frios</div>
-        <div class="hint">Baixa chance</div>
-      </div>
-
-      <div class="card panel">
-        <div class="panelHeader">
-          <div class="panelHeaderLeft">
-            <h2>Ranking de leads</h2>
-            <div class="sub" id="subTitle">Carregue um client_id para ver o ranking.</div>
-          </div>
-          <div class="panelHeaderRight">
-            <span class="pill" id="pillThreshold">threshold: —</span>
-            <span class="pill" id="pillCounts">convertidos: — | negados: — | pendentes: —</span>
-          </div>
+    <!-- DASHBOARD VIEW -->
+    <div id="viewDashboard">
+      <div class="grid">
+        <div class="card kpi">
+          <div class="value" id="kpiTotal">0</div>
+          <div class="label">Total de leads (últimos 200)</div>
+          <div class="hint" id="kpiUpdated">—</div>
+        </div>
+        <div class="card kpi">
+          <div class="value" id="kpiHot">0</div>
+          <div class="label">🔥 Quentes (score alto)</div>
+          <div class="hint">Prioridade máxima</div>
+        </div>
+        <div class="card kpi">
+          <div class="value" id="kpiWarm">0</div>
+          <div class="label">🟡 Mornos</div>
+          <div class="hint">Valem follow-up</div>
+        </div>
+        <div class="card kpi">
+          <div class="value" id="kpiCold">0</div>
+          <div class="label">❄️ Frios</div>
+          <div class="hint">Baixa chance</div>
         </div>
 
-        <div class="split">
-          <div class="card" style="background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10);">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px; margin-bottom: 8px;">
-              <div>
-                <div style="font-weight:700;">Últimos 200</div>
-                <div style="color:var(--muted); font-size:12px;">Distribuição por score (Quente/Morno/Frio)</div>
+        <div class="card panel">
+          <div class="panelHeader">
+            <div class="panelHeaderLeft">
+              <h2>Ranking de leads</h2>
+              <div class="sub" id="subTitle">Escolha um workspace e clique em Carregar.</div>
+            </div>
+            <div class="panelHeaderRight">
+              <span class="pill" id="pillThreshold">threshold: —</span>
+              <span class="pill" id="pillCounts">convertidos: — | negados: — | pendentes: —</span>
+            </div>
+          </div>
+
+          <div class="split">
+            <div class="card" style="background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10);">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px; margin-bottom: 8px;">
+                <div>
+                  <div style="font-weight:700;">Últimos 200</div>
+                  <div style="color:var(--muted); font-size:12px;">Distribuição por score (Quente/Morno/Frio)</div>
+                </div>
+                <a class="btn small" href="#" id="btnExport" onclick="return false;">Exportar CSV</a>
               </div>
-              <a class="link" href="#" id="btnExport">Exportar CSV</a>
+              <div class="chartWrap">
+                <canvas id="grafico"></canvas>
+              </div>
             </div>
-            <div class="chartWrap">
-              <canvas id="grafico"></canvas>
+
+            <div class="card" style="background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10);">
+              <div style="font-weight:700; margin-bottom: 10px;">Ações</div>
+              <div style="color:var(--muted); font-size:12px; line-height:1.5;">
+                • Clique em um lead para ver detalhes<br/>
+                • Marque ✅/❌ para treinar a IA<br/>
+                • “Recalcular” atualiza scores dos pendentes<br/>
+                • “Auto threshold” ajusta o corte automaticamente
+              </div>
+              <div style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 12px;">
+                <div class="mono">Backend:</div>
+                <div class="mono" id="backendLabel">—</div>
+              </div>
             </div>
           </div>
 
-          <div class="card" style="background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10);">
-            <div style="font-weight:700; margin-bottom: 10px;">Ações rápidas</div>
-            <div style="color:var(--muted); font-size:12px; line-height:1.5;">
-              • Clique em um lead para ver detalhes<br/>
-              • Marque ✅/❌ para treinar a IA<br/>
-              • “Recalcular” atualiza scores dos pendentes<br/>
-              • “Auto threshold” ajusta o corte automaticamente
-            </div>
-            <div style="margin-top: 12px; display:flex; gap: 10px; flex-wrap:wrap;">
-              <button class="btn small" id="btnAll">Todos</button>
-              <button class="btn small" id="btnPend">Pendentes</button>
-              <button class="btn small" id="btnRot">Rotulados</button>
-            </div>
-            <div style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 12px;">
-              <div class="mono">Backend:</div>
-              <div class="mono" id="backendLabel">—</div>
-            </div>
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:90px;">Prioridade</th>
+                  <th>Lead</th>
+                  <th style="width:190px;">Score</th>
+                  <th style="width:170px;">Status</th>
+                  <th style="width:220px; text-align:right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tabela"></tbody>
+            </table>
           </div>
-        </div>
-
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width:90px;">Prioridade</th>
-                <th>Lead</th>
-                <th style="width:190px;">Score</th>
-                <th style="width:170px;">Status</th>
-                <th style="width:220px; text-align:right;">Ações</th>
-              </tr>
-            </thead>
-            <tbody id="tabela"></tbody>
-          </table>
         </div>
       </div>
     </div>
+
+    <!-- INSIGHTS VIEW -->
+    <div id="viewInsights" class="hidden">
+      <div class="grid">
+        <div class="card kpi">
+          <div class="value" id="insLabeled">0</div>
+          <div class="label">Rotulados</div>
+          <div class="hint">✅ + ❌</div>
+        </div>
+        <div class="card kpi">
+          <div class="value" id="insConv">0</div>
+          <div class="label">Convertidos</div>
+          <div class="hint">✅</div>
+        </div>
+        <div class="card kpi">
+          <div class="value" id="insDen">0</div>
+          <div class="label">Negados</div>
+          <div class="hint">❌</div>
+        </div>
+        <div class="card kpi">
+          <div class="value" id="insRate">0%</div>
+          <div class="label">Conversão (rotulados)</div>
+          <div class="hint">Janela móvel</div>
+        </div>
+
+        <div class="card panel">
+          <div class="panelHeader">
+            <div class="panelHeaderLeft">
+              <h2>Conversão por faixa</h2>
+              <div class="sub" id="insSub">Últimos 14 dias</div>
+            </div>
+            <div class="panelHeaderRight">
+              <span class="pill" id="insWs">workspace: —</span>
+            </div>
+          </div>
+          <div class="split">
+            <div class="card" style="background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10);">
+              <div style="font-weight:700; margin-bottom:8px;">Taxa por faixa (Hot/Warm/Cold)</div>
+              <div class="chartWrap">
+                <canvas id="insBar"></canvas>
+              </div>
+            </div>
+            <div class="card" style="background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.10);">
+              <div style="font-weight:700; margin-bottom:8px;">Rotulados por dia</div>
+              <div class="chartWrap">
+                <canvas id="insLine"></canvas>
+              </div>
+            </div>
+          </div>
+          <div style="padding:14px; border-top:1px solid rgba(255,255,255,0.10);">
+            <div class="mono" id="insExplain">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <div class="toast" id="toast"></div>
@@ -333,14 +403,22 @@
   </div>
 
 <script>
-  // ✅ Ajuste aqui se mudar o domínio do backend (Python service).
+  // ✅ Backend oficial
   const BACKEND = "https://qualificador-leads-i-a.onrender.com";
 
-  // Faixas visuais (UX). O threshold real pode variar (auto_threshold).
+  // UX bands
   const HOT_MIN  = 0.70;
   const WARM_MIN = 0.40;
 
-  let chart = null;
+  // Workspace storage
+  const WS_KEY = "leadrank_workspaces";
+  const WS_LAST = "leadrank_last_workspace";
+  const DEMO_KEY_STORE = "leadrank_demo_key"; // sessionStorage
+
+  let chartDash = null;
+  let chartInsBar = null;
+  let chartInsLine = null;
+
   let leads = [];
   let currentLead = null;
   let savedThreshold = null;
@@ -376,6 +454,68 @@
   function safeStr(x){ return (x === null || x === undefined) ? "" : String(x); }
   function normalize(s){ return safeStr(s).toLowerCase().trim(); }
 
+  function getWorkspace(){
+    const sel = document.getElementById("workspace");
+    return sel.value || "";
+  }
+
+  function loadWorkspaces(){
+    let list = [];
+    try{
+      list = JSON.parse(localStorage.getItem(WS_KEY) || "[]");
+      if (!Array.isArray(list)) list = [];
+    }catch(e){ list = []; }
+    if (list.length === 0){
+      list = ["teste1"];
+      localStorage.setItem(WS_KEY, JSON.stringify(list));
+    }
+    return list;
+  }
+
+  function saveWorkspaces(list){
+    localStorage.setItem(WS_KEY, JSON.stringify(list));
+  }
+
+  function renderWorkspaces(){
+    const list = loadWorkspaces();
+    const sel = document.getElementById("workspace");
+    sel.innerHTML = "";
+    list.forEach(w => {
+      const opt = document.createElement("option");
+      opt.value = w;
+      opt.textContent = w;
+      sel.appendChild(opt);
+    });
+    const last = localStorage.getItem(WS_LAST);
+    if (last && list.includes(last)) sel.value = last;
+    else sel.value = list[0];
+  }
+
+  async function api(path, opts={}){
+    const url = BACKEND + path;
+    const res = await fetch(url, opts);
+    let data = null;
+    try{ data = await res.json(); } catch(e){}
+    if (!res.ok){
+      const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  function downloadCSV(rows){
+    const headers = ["id","nome","email_lead","telefone","probabilidade","virou_cliente","tempo_site","paginas_visitadas","clicou_preco","created_at"];
+    const esc = (v) => `"${String(v ?? "").replace(/"/g,'""')}"`;
+    const csv = [headers.join(",")].concat(rows.map(r => headers.map(h => esc(r[h])).join(","))).join("\\n");
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leadrank_${(getWorkspace() || "workspace")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function openDrawer(lead){
     currentLead = lead;
 
@@ -399,7 +539,7 @@
       <div class="row"><div class="k">${k}</div><div class="v">${v}</div></div>
     `).join("");
 
-    const tel = safeStr(lead.telefone).replace(/\D/g,'');
+    const tel = safeStr(lead.telefone).replace(/\\D/g,'');
     const call = document.getElementById("dCall");
     const whats = document.getElementById("dWhats");
 
@@ -427,31 +567,6 @@
     document.getElementById("drawerOverlay").style.display = "none";
     document.getElementById("drawer").style.transform = "translateX(100%)";
     currentLead = null;
-  }
-
-  function downloadCSV(rows){
-    const headers = ["id","nome","email_lead","telefone","probabilidade","virou_cliente","tempo_site","paginas_visitadas","clicou_preco","created_at"];
-    const esc = (v) => `"${String(v ?? "").replace(/"/g,'""')}"`;
-    const csv = [headers.join(",")].concat(rows.map(r => headers.map(h => esc(r[h])).join(","))).join("\n");
-    const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `leadrank_${(document.getElementById("clientId").value || "cliente")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function api(path, opts={}){
-    const url = BACKEND + path;
-    const res = await fetch(url, opts);
-    let data = null;
-    try{ data = await res.json(); } catch(e){}
-    if (!res.ok){
-      const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-    return data;
   }
 
   function computeKpis(rows){
@@ -491,7 +606,7 @@
   }
 
   function renderRowActions(l){
-    const tel = safeStr(l.telefone).replace(/\D/g,'');
+    const tel = safeStr(l.telefone).replace(/\\D/g,'');
     const hasTel = !!tel;
     const labeled = (l.virou_cliente === 0 || l.virou_cliente === 1);
 
@@ -500,9 +615,9 @@
     const waBtn = hasTel ? `<a class="btn small" href="https://wa.me/55${tel}?text=${msg}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">💬</a>`
                          : `<a class="btn small" href="#" style="opacity:.5;pointer-events:none;" onclick="event.stopPropagation()">💬</a>`;
 
-    const confirmBtn = labeled ? `<button class="btn small good" data-action="confirm" disabled style="opacity:.5;" onclick="event.stopPropagation()">✅</button>`
+    const confirmBtn = labeled ? `<button class="btn small good" disabled style="opacity:.5;" onclick="event.stopPropagation()">✅</button>`
                                : `<button class="btn small good" data-action="confirm" onclick="event.stopPropagation()">✅</button>`;
-    const denyBtn = labeled ? `<button class="btn small danger" data-action="deny" disabled style="opacity:.5;" onclick="event.stopPropagation()">❌</button>`
+    const denyBtn = labeled ? `<button class="btn small danger" disabled style="opacity:.5;" onclick="event.stopPropagation()">❌</button>`
                             : `<button class="btn small danger" data-action="deny" onclick="event.stopPropagation()">❌</button>`;
 
     return `${callBtn}${waBtn}${confirmBtn}${denyBtn}`;
@@ -562,11 +677,11 @@
     });
   }
 
-  function renderChart(rows){
+  function renderChartDash(rows){
     const {hot, warm, cold} = computeKpis(rows);
     const ctx = document.getElementById("grafico");
-    if (chart) chart.destroy();
-    chart = new Chart(ctx, {
+    if (chartDash) chartDash.destroy();
+    chartDash = new Chart(ctx, {
       type: "bar",
       data: { labels: ["🔥 Quentes", "🟡 Mornos", "❄️ Frios"], datasets: [{ label: "Leads (últimos 200)", data: [hot, warm, cold] }] },
       options: {
@@ -602,9 +717,9 @@
   }
 
   async function carregar(){
-    const clientId = document.getElementById("clientId").value.trim();
-    if (!clientId){ toast("Informe um client_id."); return; }
-    localStorage.setItem("leadrank_client_id", clientId);
+    const clientId = getWorkspace();
+    if (!clientId){ toast("Crie/seleciona um workspace."); return; }
+    localStorage.setItem(WS_LAST, clientId);
 
     document.getElementById("subTitle").textContent = "Carregando…";
     try{
@@ -624,9 +739,9 @@
 
       updateHeader(summary);
       renderTable();
-      renderChart(leads);
+      renderChartDash(leads);
 
-      document.getElementById("subTitle").textContent = `Mostrando ${leads.length} leads (ordenados por score).`;
+      document.getElementById("subTitle").textContent = `Workspace: ${clientId} • ${leads.length} leads (ordenados por score).`;
       toast("Dados carregados ✅");
     }catch(err){
       document.getElementById("subTitle").textContent = "Erro ao carregar.";
@@ -635,8 +750,8 @@
   }
 
   async function labelLead(leadId, label){
-    const clientId = document.getElementById("clientId").value.trim();
-    if (!clientId) return toast("Informe um client_id.");
+    const clientId = getWorkspace();
+    if (!clientId) return toast("Selecione um workspace.");
     try{
       const path = (label === 1) ? "/confirmar_venda" : "/negar_venda";
       await api(path, {
@@ -653,8 +768,8 @@
   }
 
   async function recalcPending(){
-    const clientId = document.getElementById("clientId").value.trim();
-    if (!clientId) return toast("Informe um client_id.");
+    const clientId = getWorkspace();
+    if (!clientId) return toast("Selecione um workspace.");
     try{
       const res = await api(`/recalc_pending?client_id=${encodeURIComponent(clientId)}&limit=500`);
       toast(`Recalculado: ${res.updated || 0} leads ✅`);
@@ -665,8 +780,8 @@
   }
 
   async function autoThreshold(){
-    const clientId = document.getElementById("clientId").value.trim();
-    if (!clientId) return toast("Informe um client_id.");
+    const clientId = getWorkspace();
+    if (!clientId) return toast("Selecione um workspace.");
     try{
       const res = await api(`/auto_threshold`, {
         method: "POST",
@@ -681,38 +796,180 @@
     }
   }
 
-  // Drawer actions
-  document.getElementById("dConfirm").addEventListener("click", async () => { if (currentLead) await labelLead(currentLead.id, 1); });
-  document.getElementById("dDeny").addEventListener("click", async () => { if (currentLead) await labelLead(currentLead.id, 0); });
+  async function loadInsights(){
+    const clientId = getWorkspace();
+    if (!clientId) return toast("Selecione um workspace.");
+    try{
+      const data = await api(`/insights?client_id=${encodeURIComponent(clientId)}&days=14`);
+      document.getElementById("insWs").textContent = `workspace: ${clientId}`;
+      document.getElementById("insSub").textContent = `Últimos ${data.window_days} dias`;
+      document.getElementById("insLabeled").textContent = String(data.overall.labeled || 0);
+      document.getElementById("insConv").textContent = String(data.overall.converted || 0);
+      document.getElementById("insDen").textContent = String(data.overall.denied || 0);
+      document.getElementById("insRate").textContent = Math.round((data.overall.conversion_rate || 0)*100) + "%";
 
-  // Close drawer
-  document.getElementById("btnClose").addEventListener("click", closeDrawer);
-  document.getElementById("drawerOverlay").addEventListener("click", closeDrawer);
-  window.addEventListener("keydown", (e)=>{ if(e.key === "Escape") closeDrawer(); });
+      const hot = data.bands.hot || {};
+      const warm = data.bands.warm || {};
+      const cold = data.bands.cold || {};
+      const rates = [
+        Math.round((hot.conversion_rate || 0)*100),
+        Math.round((warm.conversion_rate || 0)*100),
+        Math.round((cold.conversion_rate || 0)*100),
+      ];
 
-  // Controls
+      // Bar
+      const ctxB = document.getElementById("insBar");
+      if (chartInsBar) chartInsBar.destroy();
+      chartInsBar = new Chart(ctxB, {
+        type: "bar",
+        data: { labels: ["🔥 Quentes", "🟡 Mornos", "❄️ Frios"], datasets: [{ label: "Conversão (%)", data: rates }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: "rgba(255,255,255,0.75)" }, grid: { color: "rgba(255,255,255,0.08)" } },
+            y: { ticks: { color: "rgba(255,255,255,0.75)" }, grid: { color: "rgba(255,255,255,0.08)" }, beginAtZero: true, max: 100 }
+          }
+        }
+      });
+
+      // Line
+      const series = data.series || [];
+      const labels = series.map(r => r.d);
+      const converted = series.map(r => Number(r.converted || 0));
+      const denied = series.map(r => Number(r.denied || 0));
+      const ctxL = document.getElementById("insLine");
+      if (chartInsLine) chartInsLine.destroy();
+      chartInsLine = new Chart(ctxL, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Convertidos", data: converted, tension: 0.25 },
+            { label: "Negados", data: denied, tension: 0.25 }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: "rgba(255,255,255,0.85)" } } },
+          scales: {
+            x: { ticks: { color: "rgba(255,255,255,0.75)" }, grid: { color: "rgba(255,255,255,0.08)" } },
+            y: { ticks: { color: "rgba(255,255,255,0.75)" }, grid: { color: "rgba(255,255,255,0.08)" }, beginAtZero: true }
+          }
+        }
+      });
+
+      document.getElementById("insExplain").textContent =
+        "Dica: se 🔥 Quentes tiverem conversão muito maior que 🟡/❄️, você está priorizando corretamente. Isso vira prova pra vender o LeadRank.";
+
+      toast("Insights carregados ✅");
+    }catch(err){
+      toast("Erro: " + err.message);
+    }
+  }
+
+  async function gerarDemo(){
+    const clientId = getWorkspace();
+    if (!clientId) return toast("Selecione um workspace.");
+
+    let key = sessionStorage.getItem(DEMO_KEY_STORE) || "";
+    if (!key){
+      key = prompt("Cole sua DEMO_KEY (Render → Backend → Environment):");
+      if (!key) return;
+      sessionStorage.setItem(DEMO_KEY_STORE, key);
+    }
+
+    try{
+      const res = await api(`/seed_demo`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json", "X-DEMO-KEY": key},
+        body: JSON.stringify({client_id: clientId, n: 30})
+      });
+      toast(`Demo gerada ✅ (${res.inserted} leads)`);
+      await carregar();
+    }catch(err){
+      toast("Erro: " + err.message + " (Se mudou a key, recarregue a página e tente de novo.)");
+    }
+  }
+
+  // Tabs
+  function showDash(){
+    document.getElementById("viewDashboard").classList.remove("hidden");
+    document.getElementById("viewInsights").classList.add("hidden");
+    document.getElementById("tabDash").classList.add("active");
+    document.getElementById("tabInsights").classList.remove("active");
+  }
+  function showInsights(){
+    document.getElementById("viewDashboard").classList.add("hidden");
+    document.getElementById("viewInsights").classList.remove("hidden");
+    document.getElementById("tabDash").classList.remove("active");
+    document.getElementById("tabInsights").classList.add("active");
+    loadInsights();
+  }
+
+  // UI events
   document.getElementById("btnCarregar").addEventListener("click", carregar);
   document.getElementById("btnRecalc").addEventListener("click", recalcPending);
   document.getElementById("btnAutoTh").addEventListener("click", autoThreshold);
+  document.getElementById("btnDemo").addEventListener("click", gerarDemo);
 
   document.getElementById("search").addEventListener("input", () => renderTable());
   document.getElementById("view").addEventListener("change", () => renderTable());
 
-  document.getElementById("btnAll").addEventListener("click", () => { document.getElementById("view").value="todos"; renderTable(); });
-  document.getElementById("btnPend").addEventListener("click", () => { document.getElementById("view").value="pendentes"; renderTable(); });
-  document.getElementById("btnRot").addEventListener("click", () => { document.getElementById("view").value="rotulados"; renderTable(); });
-
-  document.getElementById("btnExport").addEventListener("click", (e) => {
-    e.preventDefault();
+  document.getElementById("btnExport").addEventListener("click", () => {
     downloadCSV(applySearch(applyViewFilter(leads)));
   });
 
-  const saved = localStorage.getItem("leadrank_client_id");
-  if (saved) document.getElementById("clientId").value = saved;
+  document.getElementById("tabDash").addEventListener("click", showDash);
+  document.getElementById("tabInsights").addEventListener("click", showInsights);
+
+  // Drawer
+  document.getElementById("dConfirm").addEventListener("click", async () => { if (currentLead) await labelLead(currentLead.id, 1); });
+  document.getElementById("dDeny").addEventListener("click", async () => { if (currentLead) await labelLead(currentLead.id, 0); });
+  document.getElementById("btnClose").addEventListener("click", closeDrawer);
+  document.getElementById("drawerOverlay").addEventListener("click", closeDrawer);
+  window.addEventListener("keydown", (e)=>{ if(e.key === "Escape") closeDrawer(); });
+
+  // Workspace controls
+  document.getElementById("btnAddWs").addEventListener("click", () => {
+    const name = prompt("Nome do workspace (client_id):");
+    if (!name) return;
+    const w = name.trim();
+    if (!w) return;
+    const list = loadWorkspaces();
+    if (!list.includes(w)) list.push(w);
+    saveWorkspaces(list);
+    renderWorkspaces();
+    document.getElementById("workspace").value = w;
+    localStorage.setItem(WS_LAST, w);
+    toast("Workspace criado ✅");
+  });
+
+  document.getElementById("btnDelWs").addEventListener("click", () => {
+    const w = getWorkspace();
+    if (!w) return;
+    if (!confirm(`Remover workspace "${w}" deste navegador? (não apaga dados do servidor)`)) return;
+    let list = loadWorkspaces().filter(x => x !== w);
+    if (list.length === 0) list = ["teste1"];
+    saveWorkspaces(list);
+    renderWorkspaces();
+    toast("Removido ✅");
+  });
+
+  document.getElementById("workspace").addEventListener("change", () => {
+    const w = getWorkspace();
+    localStorage.setItem(WS_LAST, w);
+    // reload current view
+    if (!document.getElementById("viewInsights").classList.contains("hidden")) loadInsights();
+    else carregar();
+  });
+
+  // Init
+  renderWorkspaces();
   document.getElementById("backendLabel").textContent = BACKEND;
 
-  // Auto-load if client_id saved
-  if (saved) carregar();
+  // Auto-load
+  carregar();
 </script>
 </body>
 </html>

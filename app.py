@@ -572,15 +572,12 @@ def auto_threshold():
 
 
 @app.get("/metrics")
-def metrics():
-    client_id = (request.args.get("client_id") or "").strip()
+    def metrics():
+        client_id = (request.args.get("client_id") or "").strip()
     if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
+            return jsonify({"error": "client_id é obrigatório"}), 400
 
-    test_size = float(request.args.get("test_size", "0.2"))
-    if not (0.1 <= test_size <= 0.5):
-        return jsonify({"error": "test_size deve estar entre 0.1 e 0.5"}), 400
-
+        test_size = float(request.args.get("test_size", "0.2"))
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -594,24 +591,15 @@ def metrics():
     conn.close()
 
     if len(rows) < 20:
-        return jsonify({
-            "ok": False,
-            "reason": "Poucos rotulados (recomendo >= 20).",
-            "labeled_count": len(rows)
-        }), 400
+        return jsonify({"ok": False, "reason": "Poucos rotulados (recomendo >= 20).", "labeled_count": len(rows)}), 400
 
-    X = np.array([[float(r[0]), float(r[1]), float(r[2])] for r in rows], dtype=float)
+    X = np.array([[r[0], r[1], r[2]] for r in rows], dtype=float)
     y = np.array([int(r[3]) for r in rows], dtype=int)
 
     pos = int((y == 1).sum())
     neg = int((y == 0).sum())
     if pos < 2 or neg < 2:
-        return jsonify({
-            "ok": False,
-            "reason": "Precisa de pelo menos 2 positivos e 2 negados.",
-            "positivos": pos,
-            "negados": neg
-        }), 400
+            return jsonify({"ok": False, "reason": "Precisa de pelo menos 2 positivos e 2 negados.", "positivos": pos, "negados": neg}), 400
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=42, stratify=y
@@ -624,14 +612,14 @@ def metrics():
     model = LogisticRegression(max_iter=200)
     model.fit(Xtr, y_train)
 
-    probs = model.predict_proba(Xte)[:, 1].astype(float)
+    probs = model.predict_proba(Xte)[:, 1]
 
     # usa threshold salvo se existir
     conn = get_conn()
     cur = conn.cursor()
     th_saved = get_threshold(cur, client_id)
     conn.close()
-    threshold = float(th_saved) if th_saved is not None else DEFAULT_THRESHOLD
+    threshold = float(th_saved) if th_saved is not None else 0.7
 
     pred = (probs >= threshold).astype(int)
 
@@ -639,7 +627,7 @@ def metrics():
     recall = float(recall_score(y_test, pred, zero_division=0))
     f1 = float(f1_score(y_test, pred, zero_division=0))
 
-    tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+    tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0,1]).ravel()
 
     return jsonify({
         "ok": True,
@@ -648,7 +636,7 @@ def metrics():
         "positivos": pos,
         "negados": neg,
         "test_size": test_size,
-        "threshold_usado": float(threshold),
+        "threshold_usado": threshold,
         "precision": precision,
         "recall": recall,
         "f1": f1,
@@ -657,6 +645,224 @@ def metrics():
         "tn": int(tn),
         "fn": int(fn)
     }), 200
+
+
+
+# -----------------------------
+# Product v0.1 (LeadRank): Insights + Demo seed (protected)
+# -----------------------------
+DEMO_KEY = os.environ.get("DEMO_KEY", "").strip()
+
+def _require_demo_key():
+    """
+    Protect demo-only endpoints. Accepts key via:
+      - Header: X-DEMO-KEY
+      - Query: demo_key
+      - JSON: demo_key
+    """
+    if not DEMO_KEY:
+        return False, "DEMO_KEY não configurada no servidor."
+    key = (request.headers.get("X-DEMO-KEY") or "").strip()
+    if not key:
+        key = (request.args.get("demo_key") or "").strip()
+    if not key:
+        data = request.get_json(silent=True) or {}
+        key = (data.get("demo_key") or "").strip()
+    if key != DEMO_KEY:
+        return False, "Chave DEMO_KEY inválida."
+    return True, ""
+
+def _sigmoid(z: float) -> float:
+    try:
+        return 1.0 / (1.0 + math.exp(-z))
+    except OverflowError:
+        return 0.0 if z < 0 else 1.0
+
+@app.get("/insights")
+def insights():
+    """
+    Insights simples para vender valor:
+      - conversão por faixa (quente/morno/frio) usando probabilidade armazenada
+      - série diária (últimos N dias) de convertidos/negados
+    """
+    client_id = (request.args.get("client_id") or "").strip()
+    days = int(request.args.get("days") or "14")
+    limit = int(request.args.get("limit") or "2000")
+    if not client_id:
+        return jsonify({"error": "client_id é obrigatório"}), 400
+    days = max(3, min(days, 60))
+    limit = max(50, min(limit, 20000))
+
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    # Labeled leads (0/1)
+    cur.execute("""
+        SELECT id, probabilidade, virou_cliente, created_at
+        FROM leads
+        WHERE client_id = %s AND virou_cliente IN (0,1)
+        ORDER BY created_at DESC
+        LIMIT %s
+    """, (client_id, limit))
+    labeled = cur.fetchall()
+
+    def band(prob):
+        if prob is None:
+            return "cold"
+        try:
+            p = float(prob)
+        except Exception:
+            return "cold"
+        if p >= 0.70:
+            return "hot"
+        if p >= 0.40:
+            return "warm"
+        return "cold"
+
+    bands = {
+        "hot":  {"count": 0, "converted": 0, "denied": 0},
+        "warm": {"count": 0, "converted": 0, "denied": 0},
+        "cold": {"count": 0, "converted": 0, "denied": 0},
+    }
+
+    conv = 0
+    den = 0
+    for r in labeled:
+        b = band(r.get("probabilidade"))
+        bands[b]["count"] += 1
+        if int(r["virou_cliente"]) == 1:
+            bands[b]["converted"] += 1
+            conv += 1
+        else:
+            bands[b]["denied"] += 1
+            den += 1
+
+    for k in bands:
+        c = bands[k]["count"]
+        cr = (bands[k]["converted"] / c) if c else 0.0
+        bands[k]["conversion_rate"] = round(cr, 4)
+
+    overall_rate = (conv / (conv + den)) if (conv + den) else 0.0
+
+    # Daily series (last N days) - based on created_at of labeled leads
+    cur.execute("""
+        SELECT (created_at::date) AS d,
+               SUM(CASE WHEN virou_cliente = 1 THEN 1 ELSE 0 END) AS converted,
+               SUM(CASE WHEN virou_cliente = 0 THEN 1 ELSE 0 END) AS denied
+        FROM leads
+        WHERE client_id = %s
+          AND virou_cliente IN (0,1)
+          AND created_at >= (NOW() - (%s || ' days')::interval)
+        GROUP BY d
+        ORDER BY d ASC
+    """, (client_id, days))
+    series = cur.fetchall()
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "client_id": client_id,
+        "overall": {
+            "labeled": int(conv + den),
+            "converted": int(conv),
+            "denied": int(den),
+            "conversion_rate": round(overall_rate, 4),
+        },
+        "bands": bands,
+        "series": series,
+        "window_days": days
+    }), 200
+
+@app.post("/seed_demo")
+def seed_demo():
+    """
+    Gera dados realistas de demonstração para um client_id.
+    Protegido por DEMO_KEY (env var).
+    """
+    ok, msg = _require_demo_key()
+    if not ok:
+        return jsonify({"ok": False, "error": msg}), 403
+
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    n = int(data.get("n") or 30)
+    n = max(10, min(n, 300))
+
+    if not client_id:
+        suffix = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+        client_id = f"demo_{suffix}"
+
+    # Ensure a user row exists (so o onboarding/login não estranha).
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE client_id = %s", (client_id,))
+    if cur.fetchone() is None:
+        # cria um usuário demo (não expomos senha aqui)
+        demo_email = f"{client_id}@leadrank.demo"
+        demo_password_hash = generate_password_hash("demo1234")
+        cur.execute("""
+            INSERT INTO users (client_id, email, password_hash)
+            VALUES (%s,%s,%s)
+            ON CONFLICT (client_id) DO NOTHING
+        """, (client_id, demo_email, demo_password_hash))
+
+    # Generate leads
+    converted_target = int(round(n * 0.40))
+    denied_target = int(round(n * 0.35))
+    pending_target = n - converted_target - denied_target
+
+    def mk_lead(label: int):
+        # label: 1 converted, 0 denied, -1 pending
+        # Generate features correlated with label
+        if label == 1:
+            tempo = random.randint(90, 260)
+            pages = random.randint(4, 12)
+            click = 1 if random.random() < 0.75 else 0
+        elif label == 0:
+            tempo = random.randint(10, 120)
+            pages = random.randint(1, 6)
+            click = 1 if random.random() < 0.20 else 0
+        else:
+            tempo = random.randint(20, 220)
+            pages = random.randint(1, 10)
+            click = 1 if random.random() < 0.35 else 0
+
+        # Heuristic prob (for a nice demo distribution)
+        z = -2.0 + 0.012*tempo + 0.22*pages + 1.25*click + random.uniform(-0.6, 0.6)
+        prob = _sigmoid(z)
+
+        name = random.choice(["Ana", "Bruno", "Carla", "Diego", "Edu", "Fernanda", "Gabi", "Helena", "Igor", "João", "Katia", "Lucas", "Mariana", "Nina", "Otávio", "Paula", "Renato", "Sofia", "Tiago", "Vitor"])
+        phone = "11" + "".join(random.choice(string.digits) for _ in range(9))
+        email = f"{name.lower()}.{random.randint(10,999)}@lead.com"
+        return tempo, pages, click, label, prob, name, phone, email
+
+    rows = []
+    for _ in range(converted_target):
+        rows.append(mk_lead(1))
+    for _ in range(denied_target):
+        rows.append(mk_lead(0))
+    for _ in range(pending_target):
+        rows.append(mk_lead(-1))
+    random.shuffle(rows)
+
+    cur.executemany("""
+        INSERT INTO leads (client_id, tempo_site, paginas_visitadas, clicou_preco, virou_cliente,
+                           probabilidade, nome, telefone, email_lead)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, [(client_id, *r) for r in rows])
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "ok": True,
+        "client_id": client_id,
+        "inserted": n,
+        "converted": converted_target,
+        "denied": denied_target,
+        "pending": pending_target
+    }), 200
+
 
 # -----------------------------
 # Boot
