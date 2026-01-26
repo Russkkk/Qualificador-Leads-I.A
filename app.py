@@ -11,7 +11,8 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.model_selection import train_test_split
 
 # -----------------------------
 # Config
@@ -569,6 +570,94 @@ def auto_threshold():
 
     return jsonify({"ok": True, "client_id": client_id, **best}), 200
 
+
+@app.get("/metrics")
+def metrics():
+    client_id = (request.args.get("client_id") or "").strip()
+    if not client_id:
+        return jsonify({"error": "client_id é obrigatório"}), 400
+
+    test_size = float(request.args.get("test_size", "0.2"))
+    if not (0.1 <= test_size <= 0.5):
+        return jsonify({"error": "test_size deve estar entre 0.1 e 0.5"}), 400
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
+        FROM leads
+        WHERE client_id = %s AND virou_cliente IN (0,1)
+        ORDER BY id DESC
+        LIMIT 5000
+    """, (client_id,))
+    rows = cur.fetchall()
+    conn.close()
+
+    if len(rows) < 20:
+        return jsonify({
+            "ok": False,
+            "reason": "Poucos rotulados (recomendo >= 20).",
+            "labeled_count": len(rows)
+        }), 400
+
+    X = np.array([[float(r[0]), float(r[1]), float(r[2])] for r in rows], dtype=float)
+    y = np.array([int(r[3]) for r in rows], dtype=int)
+
+    pos = int((y == 1).sum())
+    neg = int((y == 0).sum())
+    if pos < 2 or neg < 2:
+        return jsonify({
+            "ok": False,
+            "reason": "Precisa de pelo menos 2 positivos e 2 negados.",
+            "positivos": pos,
+            "negados": neg
+        }), 400
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=y
+    )
+
+    scaler = StandardScaler()
+    Xtr = scaler.fit_transform(X_train)
+    Xte = scaler.transform(X_test)
+
+    model = LogisticRegression(max_iter=200)
+    model.fit(Xtr, y_train)
+
+    probs = model.predict_proba(Xte)[:, 1].astype(float)
+
+    # usa threshold salvo se existir
+    conn = get_conn()
+    cur = conn.cursor()
+    th_saved = get_threshold(cur, client_id)
+    conn.close()
+    threshold = float(th_saved) if th_saved is not None else DEFAULT_THRESHOLD
+
+    pred = (probs >= threshold).astype(int)
+
+    precision = float(precision_score(y_test, pred, zero_division=0))
+    recall = float(recall_score(y_test, pred, zero_division=0))
+    f1 = float(f1_score(y_test, pred, zero_division=0))
+
+    tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
+
+    return jsonify({
+        "ok": True,
+        "client_id": client_id,
+        "labeled_count": len(rows),
+        "positivos": pos,
+        "negados": neg,
+        "test_size": test_size,
+        "threshold_usado": float(threshold),
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "tp": int(tp),
+        "fp": int(fp),
+        "tn": int(tn),
+        "fn": int(fn)
+    }), 200
+
 # -----------------------------
 # Boot
 # -----------------------------
@@ -579,6 +668,8 @@ try:
 except Exception as e:
     # Avoid crashing import in some contexts; endpoints will raise if DB is misconfigured.
     print("DB init warning:", str(e))
+    
+    
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
