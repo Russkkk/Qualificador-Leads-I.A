@@ -320,8 +320,10 @@ def prever():
     return jsonify(
         {
             "lead_id": lead_id,
-            "probabilidade_de_compra": round(prob, 2),
+            "probabilidade_de_compra": round(prob, 4),
             "lead_quente": lead_quente,
+            "modelo_treinado": bool(model),
+            "fallback_usado": (model is None),
         }
     )
 
@@ -434,6 +436,82 @@ def dashboard_data():
             "convertidos": convertidos,
             "negados": negados,
             "dados": df_out.to_dict(orient="records"),
+        }
+    )
+
+
+@app.route("/debug_model", methods=["GET"])
+def debug_model():
+    """Diagnóstico para entender por que o /prever está retornando fallback (ex: 0.35).
+
+    Retorna:
+      - contagem de leads total / convertidos / negados / pendentes
+      - quantos rótulos existem (0/1) e se dá para treinar
+      - últimos exemplos rotulados e pendentes (para inspeção)
+    """
+    client_id = (request.args.get("client_id") or "").strip()
+    if not client_id:
+        return jsonify({"erro": "client_id obrigatório"}), 400
+
+    conn, _ = get_db(client_id)
+
+    # Pegamos um recorte recente para debug (evita resposta gigante).
+    df = pd.read_sql(
+        """SELECT id, tempo_site, paginas_visitadas, clicou_preco,
+                  virou_cliente, probabilidade, nome, telefone, email_lead, created_at
+             FROM leads
+             ORDER BY id DESC
+             LIMIT 200""",
+        conn,
+    )
+    conn.close()
+
+    total = int(len(df))
+    convertidos = int((df["virou_cliente"] == 1).sum()) if total else 0
+    negados = int((df["virou_cliente"] == 0).sum()) if total else 0
+    pendentes = total - convertidos - negados
+
+    df_labeled = df[df["virou_cliente"].isin([0, 1])] if total else df
+    labeled_count = int(len(df_labeled)) if total else 0
+    classes = sorted(df_labeled["virou_cliente"].dropna().unique().tolist()) if labeled_count else []
+    can_train = (len(classes) >= 2) and (labeled_count >= 4)
+
+    # Explicação simples para o usuário entender o 0.35
+    reason = None
+    if total == 0:
+        reason = "Sem leads no banco ainda."
+    elif labeled_count == 0:
+        reason = "Sem leads rotulados (virou_cliente=0/1). Todos estão pendentes (-1/NULL)."
+    elif len(classes) < 2:
+        reason = "Só existe uma classe rotulada (apenas 0 ou apenas 1). Precisa ter 0 e 1."
+    elif labeled_count < 4:
+        reason = "Poucos exemplos rotulados. Recomendo no mínimo 4 (2 de cada classe) para começar."
+    else:
+        reason = "Ok — dá para treinar. Se ainda vier 0.35, confira se está usando o mesmo client_id no /prever."
+
+    # Últimos exemplos úteis para inspeção
+    last_labeled = (
+        df_labeled.head(10).to_dict(orient="records") if labeled_count else []
+    )
+    last_pending = (
+        df[df["virou_cliente"].isin([-1])].head(10).to_dict(orient="records")
+        if total
+        else []
+    )
+
+    return jsonify(
+        {
+            "client_id": client_id,
+            "total_recentes_considerados": total,
+            "convertidos": convertidos,
+            "negados": negados,
+            "pendentes": pendentes,
+            "labeled_count": labeled_count,
+            "classes_rotuladas": classes,
+            "can_train": can_train,
+            "reason": reason,
+            "last_labeled": last_labeled,
+            "last_pending": last_pending,
         }
     )
 
