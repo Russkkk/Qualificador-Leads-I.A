@@ -2,206 +2,471 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Dashboard Avançado</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard • Qualificador de Leads IA</title>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #0f172a;
-      color: #e5e7eb;
-      padding: 20px;
+    :root{
+      --bg1:#0b1020; --bg2:#111b3a;
+      --panel:#0f172a; --panel2:#0b1224;
+      --border:#243047;
+      --text:#e5e7eb; --muted:#94a3b8;
+      --primary:#2563eb; --green:#22c55e; --red:#ef4444; --yellow:#eab308;
+      --radius:14px;
+      --shadow:0 18px 50px rgba(0,0,0,.45);
     }
-    h1 { margin-bottom: 10px; }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; padding:22px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color:var(--text);
+      background:
+        radial-gradient(1000px 520px at 20% 10%, rgba(37,99,235,.22), transparent 60%),
+        radial-gradient(900px 480px at 80% 20%, rgba(34,197,94,.14), transparent 55%),
+        linear-gradient(180deg, var(--bg1), var(--bg2));
+      min-height:100vh;
+    }
+    header{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:14px; margin-bottom:16px;
+    }
+    h1{ margin:0; font-size:20px; letter-spacing:-.2px; }
+    .sub{ color:var(--muted); font-size:12px; margin-top:4px; }
 
-    input, select, button {
-      padding: 8px;
-      border-radius: 6px;
-      border: none;
-      margin-right: 10px;
+    .topbar{
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+      justify-content:flex-end;
     }
 
-    button {
-      cursor: pointer;
-      background: #2563eb;
-      color: white;
+    .input, select{
+      background: rgba(2,6,23,.45);
+      border:1px solid rgba(36,48,71,.95);
+      color:var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      outline:none;
+      min-width: 220px;
     }
+    select{ min-width: 180px; }
 
-    .cards {
-      display: flex;
-      gap: 20px;
-      margin: 20px 0;
+    .btn{
+      border:none; cursor:pointer;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #2563eb, #1d4ed8);
+      color:white;
+      font-weight:700;
     }
-
-    .card {
-      background: #020617;
-      padding: 20px;
+    .btnSecondary{
+      border:1px solid rgba(148,163,184,.22);
+      background: rgba(2,6,23,.35);
+      color: var(--text);
+      cursor:pointer;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-weight:600;
+    }
+    .btnSmall{
+      padding: 7px 10px;
       border-radius: 10px;
-      width: 200px;
-      text-align: center;
+      font-weight:700;
+      font-size: 12px;
+    }
+    .btnGreen{ background: rgba(34,197,94,.18); border:1px solid rgba(34,197,94,.35); color:#dcfce7; }
+    .btnRed{ background: rgba(239,68,68,.16); border:1px solid rgba(239,68,68,.32); color:#fee2e2; }
+    .btnDisabled{ opacity:.55; cursor:not-allowed; }
+
+    .cards{
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap:12px;
+      margin: 14px 0 18px;
+    }
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border:1px solid rgba(148,163,184,.16);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .card span{ color:var(--muted); font-size: 12px; }
+    .card strong{ display:block; font-size: 24px; margin-top:4px; }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1.65fr;
+      gap:14px;
+      align-items:start;
+    }
+    .panel{
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border:1px solid rgba(148,163,184,.16);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .panel h3{ margin:0 0 10px; font-size: 14px; color:#cbd5e1; }
+
+    .row2{
+      display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 12px;
+    }
+    .search{
+      flex: 1;
+      min-width: 220px;
     }
 
-    canvas {
-      background: #020617;
-      border-radius: 10px;
-      padding: 20px;
-      margin-bottom: 30px;
-    }
-
-    table {
+    table{
       width: 100%;
       border-collapse: collapse;
-      background: #020617;
-      border-radius: 10px;
-      overflow: hidden;
+      overflow:hidden;
+      border-radius: 12px;
+      background: rgba(2,6,23,.45);
+      border:1px solid rgba(36,48,71,.95);
     }
-
-    th, td {
-      padding: 10px;
-      border-bottom: 1px solid #1e293b;
-      text-align: center;
+    th, td{
+      padding: 10px 10px;
+      border-bottom: 1px solid rgba(36,48,71,.75);
+      font-size: 13px;
+      text-align:left;
+      vertical-align: middle;
     }
-
-    th {
-      background: #020617;
-      font-weight: bold;
+    th{
+      color: var(--muted);
+      font-weight: 600;
+      background: rgba(2,6,23,.55);
     }
+    tr:hover{ background: rgba(148,163,184,.06); }
 
-    tr:hover {
-      background: #1e293b;
-      cursor: pointer;
+    .tag{
+      display:inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing:.2px;
+      border:1px solid rgba(148,163,184,.18);
+    }
+    .tConv{ background: rgba(34,197,94,.14); border-color: rgba(34,197,94,.35); color:#dcfce7; }
+    .tNeg{ background: rgba(239,68,68,.14); border-color: rgba(239,68,68,.33); color:#fee2e2; }
+    .tPen{ background: rgba(234,179,8,.14); border-color: rgba(234,179,8,.35); color:#fef3c7; }
+
+    .muted{ color: var(--muted); }
+
+    .toast{
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border:1px solid rgba(148,163,184,.18);
+      background: rgba(2,6,23,.75);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      font-size: 13px;
+      display:none;
+      max-width: 380px;
+      line-height: 1.35;
+    }
+    .toast.show{ display:block; }
+    .toast.success{ border-color: rgba(34,197,94,.35); }
+    .toast.error{ border-color: rgba(239,68,68,.35); }
+
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
     }
   </style>
 </head>
 
 <body>
+  <header>
+    <div>
+      <h1>📊 Dashboard — Qualificador de Leads IA</h1>
+      <div class="sub">Filtro, busca, exportação CSV e ações rápidas</div>
+    </div>
 
-<h1>📊 Dashboard Avançado</h1>
+    <div class="topbar">
+      <input id="clientId" class="input" placeholder="client_id" />
+      <button class="btn" id="btnLoad">Atualizar</button>
+      <button class="btnSecondary" id="btnExport">Exportar CSV</button>
+      <button class="btnSecondary" id="btnLogout">Limpar client_id</button>
+    </div>
+  </header>
 
-<div>
-  <input id="clientId" placeholder="client_id" />
-  <select id="filtro">
-    <option value="todos">Todos</option>
-    <option value="quentes">Quentes</option>
-    <option value="frios">Frios</option>
-  </select>
-  <button onclick="carregar()">Carregar</button>
-</div>
+  <section class="cards">
+    <div class="card"><span>Total de leads</span><strong id="kpiTotal">0</strong></div>
+    <div class="card"><span>Convertidos</span><strong id="kpiConv">0</strong></div>
+    <div class="card"><span>Pendentes</span><strong id="kpiPen">0</strong></div>
+    <div class="card"><span>Negados</span><strong id="kpiNeg">0</strong></div>
+    <div class="card"><span>Taxa de conversão</span><strong id="kpiRate">0%</strong></div>
+  </section>
 
-<div class="cards">
-  <div class="card">
-    <h2 id="total">0</h2>
-    <p>Total</p>
-  </div>
-  <div class="card">
-    <h2 id="quentes">0</h2>
-    <p>Quentes</p>
-  </div>
-  <div class="card">
-    <h2 id="frios">0</h2>
-    <p>Frios</p>
-  </div>
-</div>
+  <section class="grid">
+    <div class="panel">
+      <h3>Status dos leads</h3>
+      <canvas id="chart"></canvas>
+      <div class="muted" style="margin-top:10px;font-size:12px;">
+        Dica: “Pendentes” são leads ainda sem confirmação (virou_cliente = -1).
+      </div>
+    </div>
 
-<canvas id="grafico"></canvas>
+    <div class="panel">
+      <h3>Leads</h3>
 
-<table>
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>Tempo</th>
-      <th>Páginas</th>
-      <th>Clicou Preço</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="tabela"></tbody>
-</table>
+      <div class="row2">
+        <select id="filtro">
+          <option value="todos">Todos</option>
+          <option value="convertidos">Convertidos</option>
+          <option value="pendentes">Pendentes</option>
+          <option value="negados">Negados</option>
+        </select>
+
+        <input id="busca" class="input search" placeholder="Buscar por ID (ex: 12)..." />
+      </div>
+
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:70px;">ID</th>
+              <th>Tempo (s)</th>
+              <th>Páginas</th>
+              <th>Clicou preço</th>
+              <th>Status</th>
+              <th style="width:220px;">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="muted" style="margin-top:10px;font-size:12px;">
+        * Export CSV usa os dados já carregados do endpoint <code>/dashboard_data</code>. :contentReference[oaicite:2]{index=2}
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast"></div>
 
 <script>
-let chart = null;
-let leads = [];
+  const API_BASE = "https://qualificador-leads-i-a.onrender.com"; // seu backend Python
+  const elClient = document.getElementById("clientId");
+  const elFiltro = document.getElementById("filtro");
+  const elBusca  = document.getElementById("busca");
+  const elTbody  = document.getElementById("tbody");
+  const toast    = document.getElementById("toast");
 
-function carregar() {
-  const clientId = document.getElementById("clientId").value;
-  const filtro = document.getElementById("filtro").value;
+  const saved = localStorage.getItem("client_id");
+  if (saved) elClient.value = saved;
 
-  fetch(`https://qualificador-leads-i-a.onrender.com/dashboard_data?client_id=${clientId}`)
-    .then(res => res.json())
-    .then(data => {
-      leads = data.dados;
+  let leads = [];
+  let chart = null;
 
-      document.getElementById("total").innerText = data.total_leads;
-      document.getElementById("quentes").innerText = data.leads_quentes;
-      document.getElementById("frios").innerText = data.leads_frios;
-
-      atualizarTabela(filtro);
-      atualizarGrafico(data.leads_quentes, data.leads_frios);
-    })
-    .catch(() => alert("Erro ao carregar dados"));
-}
-
-function atualizarTabela(filtro) {
-  const tbody = document.getElementById("tabela");
-  tbody.innerHTML = "";
-
-  let filtrados = leads;
-
-  if (filtro === "quentes") {
-    filtrados = leads.filter(l => l.virou_cliente === 1);
+  function showToast(msg, type="success"){
+    toast.className = "toast show " + (type === "error" ? "error" : "success");
+    toast.innerHTML = msg;
+    clearTimeout(window.__t);
+    window.__t = setTimeout(() => toast.className = "toast", 3200);
   }
 
-  if (filtro === "frios") {
-    filtrados = leads.filter(l => l.virou_cliente === 0);
+  function statusInfo(v){
+    if (v === 1) return { label:"✅ Convertido", cls:"tConv" };
+    if (v === 0) return { label:"❌ Negado", cls:"tNeg" };
+    return { label:"⏳ Pendente", cls:"tPen" };
   }
 
-  filtrados.forEach(l => {
-    const tr = document.createElement("tr");
+  function computeKPIs(){
+    const total = leads.length;
+    const conv = leads.filter(l => l.virou_cliente === 1).length;
+    const neg  = leads.filter(l => l.virou_cliente === 0).length;
+    const pen  = leads.filter(l => l.virou_cliente !== 1 && l.virou_cliente !== 0).length;
 
-    tr.innerHTML = `
-      <td>${l.id}</td>
-      <td>${l.tempo_site}</td>
-      <td>${l.paginas_visitadas}</td>
-      <td>${l.clicou_preco ? "Sim" : "Não"}</td>
-      <td>${l.virou_cliente === 1 ? \"🔥 Quente\" : (l.virou_cliente === 0 ? \"❄️ Frio\" : \"⏳ Pendente\")}</td>
-    `;
+    document.getElementById("kpiTotal").textContent = total;
+    document.getElementById("kpiConv").textContent  = conv;
+    document.getElementById("kpiNeg").textContent   = neg;
+    document.getElementById("kpiPen").textContent   = pen;
 
-    tr.onclick = () => {
-      alert(
-        "Lead #" + l.id +
-        "\nTempo no site: " + l.tempo_site +
-        "\nPáginas: " + l.paginas_visitadas +
-        "\nClicou preço: " + (l.clicou_preco ? "Sim" : "Não")
-      );
-    };
+    const rate = total ? Math.round((conv / total) * 100) : 0;
+    document.getElementById("kpiRate").textContent = rate + "%";
 
-    tbody.appendChild(tr);
-  });
-}
+    drawChart(conv, pen, neg);
+  }
 
-function atualizarGrafico(quentes, frios) {
-  const ctx = document.getElementById("grafico");
+  function drawChart(conv, pen, neg){
+    const ctx = document.getElementById("chart");
+    if (chart) chart.destroy();
 
-  if (chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: ["Convertidos", "Pendentes", "Negados"],
+        datasets: [{
+          data: [conv, pen, neg]
+        }]
+      },
+      options: {
+        plugins: {
+          legend: { labels: { color: "#cbd5e1" } }
+        }
+      }
+    });
+  }
 
-  chart = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels: ["Quentes", "Frios"],
-      datasets: [{
-        label: "Leads",
-        data: [quentes, frios],
-        backgroundColor: ["#22c55e", "#ef4444"]
-      }]
+  function applyFilters(){
+    const filtro = elFiltro.value;
+    const q = elBusca.value.trim();
+
+    let arr = [...leads];
+
+    // filtro por status
+    if (filtro === "convertidos") arr = arr.filter(l => l.virou_cliente === 1);
+    if (filtro === "negados")     arr = arr.filter(l => l.virou_cliente === 0);
+    if (filtro === "pendentes")   arr = arr.filter(l => l.virou_cliente !== 1 && l.virou_cliente !== 0);
+
+    // busca por ID
+    if (q){
+      const id = parseInt(q, 10);
+      if (!Number.isNaN(id)) arr = arr.filter(l => l.id === id);
     }
+
+    renderTable(arr);
+  }
+
+  function renderTable(arr){
+    elTbody.innerHTML = "";
+    if (!arr.length){
+      elTbody.innerHTML = `<tr><td colspan="6" class="muted">Nenhum lead encontrado.</td></tr>`;
+      return;
+    }
+
+    arr.forEach(l => {
+      const st = statusInfo(l.virou_cliente);
+
+      // ações: confirmar venda (backend tem endpoint) e negar (backend NÃO tem ainda)
+      const canConfirm = l.virou_cliente !== 1;
+      const canNegar   = true; // vai ficar "desabilitado" até você criar endpoint
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${l.id}</td>
+        <td>${l.tempo_site ?? "-"}</td>
+        <td>${l.paginas_visitadas ?? "-"}</td>
+        <td>${(l.clicou_preco === 1) ? "Sim" : "Não"}</td>
+        <td><span class="tag ${st.cls}">${st.label}</span></td>
+        <td style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btnSecondary btnSmall btnGreen ${canConfirm ? "" : "btnDisabled"}"
+                  ${canConfirm ? "" : "disabled"}
+                  onclick="confirmarVenda(${l.id})">
+            Confirmar venda
+          </button>
+
+          <button class="btnSecondary btnSmall btnRed btnDisabled"
+                  title="Upgrade: criar endpoint /negar_venda para marcar virou_cliente=0"
+                  disabled>
+            Marcar negado
+          </button>
+        </td>
+      `;
+      elTbody.appendChild(tr);
+    });
+  }
+
+  async function carregar(){
+    const clientId = elClient.value.trim();
+    if (!clientId){
+      showToast("Informe o <b>client_id</b> para carregar os dados.", "error");
+      return;
+    }
+
+    localStorage.setItem("client_id", clientId);
+
+    try{
+      const res = await fetch(`${API_BASE}/dashboard_data?client_id=${encodeURIComponent(clientId)}`);
+      if (!res.ok){
+        const t = await res.text();
+        throw new Error(t || "Falha ao carregar");
+      }
+      const data = await res.json();
+
+      // Seu backend retorna os leads em data.dados. :contentReference[oaicite:3]{index=3}
+      leads = (data.dados || []).map(x => ({
+        ...x,
+        // garante numérico
+        virou_cliente: Number(x.virou_cliente)
+      }));
+
+      computeKPIs();
+      applyFilters();
+      showToast("Dados carregados com sucesso ✅");
+    } catch (e){
+      showToast("Erro ao carregar dados. Verifique o backend no Render.", "error");
+    }
+  }
+
+  async function confirmarVenda(leadId){
+    const clientId = elClient.value.trim();
+    if (!clientId) return;
+
+    try{
+      const res = await fetch(`${API_BASE}/confirmar_venda`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, lead_id: leadId })
+      });
+
+      if (!res.ok){
+        const t = await res.text();
+        throw new Error(t || "Falha ao confirmar");
+      }
+
+      showToast(`Venda confirmada para o lead <b>#${leadId}</b> ✅`);
+      // recarrega para atualizar status
+      await carregar();
+    } catch (e){
+      showToast("Erro ao confirmar venda. Veja logs do Render.", "error");
+    }
+  }
+
+  function exportCSV(){
+    if (!leads.length){
+      showToast("Não há dados para exportar.", "error");
+      return;
+    }
+
+    const headers = ["id","tempo_site","paginas_visitadas","clicou_preco","virou_cliente"];
+    const rows = leads.map(l => headers.map(h => (l[h] ?? "")).join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "leads.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast("CSV exportado 📄");
+  }
+
+  document.getElementById("btnLoad").addEventListener("click", carregar);
+  document.getElementById("btnExport").addEventListener("click", exportCSV);
+
+  document.getElementById("btnLogout").addEventListener("click", () => {
+    localStorage.removeItem("client_id");
+    elClient.value = "";
+    leads = [];
+    computeKPIs();
+    applyFilters();
+    showToast("client_id removido do navegador.");
   });
-}
 
-document.getElementById("filtro").onchange = () => {
-  atualizarTabela(document.getElementById("filtro").value);
-};
+  elFiltro.addEventListener("change", applyFilters);
+  elBusca.addEventListener("input", applyFilters);
+
+  // auto-load se tiver client_id salvo
+  if (saved) carregar();
 </script>
-
 </body>
 </html>

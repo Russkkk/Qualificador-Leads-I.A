@@ -1,11 +1,440 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Criar conta • Qualificador de Leads IA</title>
+
+  <style>
+    :root{
+      --bg1:#0b1020;
+      --bg2:#111b3a;
+      --card:#0f172a;
+      --card2:#0b1224;
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --border:#243047;
+      --primary:#2563eb;
+      --primary2:#1d4ed8;
+      --danger:#ef4444;
+      --success:#22c55e;
+      --shadow: 0 20px 60px rgba(0,0,0,.45);
+      --radius: 16px;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Helvetica Neue", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% 10%, rgba(37,99,235,.25), transparent 60%),
+        radial-gradient(900px 500px at 80% 20%, rgba(34,197,94,.18), transparent 55%),
+        linear-gradient(180deg, var(--bg1), var(--bg2));
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:28px;
+    }
+
+    .wrap{
+      width: min(960px, 100%);
+      display:grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 18px;
+    }
+
+    .hero{
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border:1px solid rgba(148,163,184,.15);
+      border-radius: var(--radius);
+      padding: 26px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow:hidden;
+    }
+    .hero::after{
+      content:"";
+      position:absolute;
+      inset:-2px;
+      background: radial-gradient(600px 300px at 30% 20%, rgba(37,99,235,.22), transparent 60%),
+                  radial-gradient(500px 280px at 70% 30%, rgba(34,197,94,.16), transparent 55%);
+      pointer-events:none;
+    }
+    .hero > *{ position:relative; }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(37,99,235,.12);
+      border:1px solid rgba(37,99,235,.25);
+      color:#c7d2fe;
+      font-size: 12px;
+      letter-spacing:.2px;
+      width: fit-content;
+    }
+
+    h1{
+      margin:14px 0 10px;
+      font-size: 28px;
+      line-height:1.15;
+      letter-spacing:-.3px;
+    }
+    p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.55;
+      font-size: 14px;
+      max-width: 52ch;
+    }
+    .bullets{
+      margin-top: 18px;
+      display:grid;
+      gap:10px;
+      padding:0;
+      list-style:none;
+    }
+    .bullets li{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      color:#cbd5e1;
+      font-size: 14px;
+      line-height:1.45;
+    }
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      margin-top:4px;
+      background: rgba(34,197,94,.85);
+      box-shadow: 0 0 0 4px rgba(34,197,94,.14);
+      flex: 0 0 auto;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border:1px solid rgba(148,163,184,.16);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+    .card h2{
+      margin: 0 0 6px;
+      font-size: 18px;
+      letter-spacing:-.2px;
+    }
+    .card .sub{
+      margin-bottom: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .field{
+      display:grid;
+      gap:7px;
+      margin-bottom: 12px;
+    }
+    label{
+      font-size: 12px;
+      color:#cbd5e1;
+    }
+    .input{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding: 12px 12px;
+      border-radius: 12px;
+      background: rgba(2,6,23,.45);
+      border:1px solid rgba(36,48,71,.9);
+    }
+    .input:focus-within{
+      border-color: rgba(37,99,235,.8);
+      box-shadow: 0 0 0 4px rgba(37,99,235,.15);
+    }
+    input{
+      width:100%;
+      border:none;
+      outline:none;
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+    }
+    input::placeholder{ color: rgba(148,163,184,.7); }
+
+    .row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin: 6px 0 14px;
+    }
+
+    .toggle{
+      appearance:none;
+      width: 42px;
+      height: 24px;
+      border-radius: 999px;
+      background: rgba(148,163,184,.25);
+      position: relative;
+      cursor:pointer;
+      border:1px solid rgba(148,163,184,.25);
+      transition: .15s ease;
+    }
+    .toggle::after{
+      content:"";
+      position:absolute;
+      top:3px; left:3px;
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      transition:.15s ease;
+    }
+    .toggle:checked{
+      background: rgba(37,99,235,.55);
+      border-color: rgba(37,99,235,.6);
+    }
+    .toggle:checked::after{ left:21px; }
+
+    .btn{
+      width:100%;
+      border:none;
+      cursor:pointer;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, var(--primary), var(--primary2));
+      color:white;
+      font-weight: 700;
+      letter-spacing:.2px;
+      transition: transform .06s ease, filter .15s ease;
+    }
+    .btn:active{ transform: translateY(1px); }
+    .btn[disabled]{
+      opacity:.7;
+      cursor:not-allowed;
+      filter: grayscale(.1);
+    }
+
+    .msg{
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      border:1px solid rgba(148,163,184,.18);
+      background: rgba(2,6,23,.35);
+      color: #cbd5e1;
+      font-size: 13px;
+      line-height:1.35;
+      display:none;
+    }
+    .msg.show{ display:block; }
+    .msg.success{
+      border-color: rgba(34,197,94,.35);
+      background: rgba(34,197,94,.08);
+      color:#dcfce7;
+    }
+    .msg.error{
+      border-color: rgba(239,68,68,.35);
+      background: rgba(239,68,68,.08);
+      color:#fee2e2;
+    }
+
+    .actions{
+      display:flex;
+      gap:10px;
+      margin-top: 12px;
+    }
+    .btnSecondary{
+      flex:1;
+      border:1px solid rgba(148,163,184,.22);
+      background: rgba(2,6,23,.35);
+      color:#e5e7eb;
+      border-radius: 12px;
+      padding: 11px 12px;
+      cursor:pointer;
+    }
+    .btnSecondary:hover{
+      border-color: rgba(37,99,235,.55);
+    }
+
+    .foot{
+      margin-top: 12px;
+      color: rgba(148,163,184,.75);
+      font-size: 12px;
+      line-height:1.4;
+    }
+
+    @media (max-width: 860px){
+      .wrap{ grid-template-columns: 1fr; }
+      h1{ font-size: 24px; }
+    }
+  </style>
+</head>
+
 <body>
-  <h2>Criar acesso</h2>
-  <form action="/criar_cliente" method="POST">
-    <input name="email" placeholder="Email" required>
-    <input name="password" type="password" placeholder="Senha" required>
-    <button>Criar conta</button>
-  </form>
+  <div class="wrap">
+    <section class="hero">
+      <div class="badge">⚡ Qualificador de Leads IA</div>
+      <h1>Crie sua conta e comece a separar curiosos de compradores</h1>
+      <p>
+        Respostas rápidas, coleta de dados e um painel simples para ver os leads.
+        Em poucos minutos você já consegue testar o fluxo completo.
+      </p>
+
+      <ul class="bullets">
+        <li><span class="dot"></span> Captura email e senha com validação</li>
+        <li><span class="dot"></span> Cria o <b>client_id</b> automaticamente</li>
+        <li><span class="dot"></span> Te leva para o dashboard com 1 clique</li>
+      </ul>
+    </section>
+
+    <main class="card">
+      <h2>Criar acesso</h2>
+      <div class="sub">Preencha seus dados para gerar seu <b>client_id</b>.</div>
+
+      <form id="onboardingForm" novalidate>
+        <div class="field">
+          <label for="email">Email</label>
+          <div class="input">
+            <input id="email" name="email" type="email" placeholder="voce@empresa.com" autocomplete="email" required />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="password">Senha</label>
+          <div class="input">
+            <input id="password" name="password" type="password" placeholder="Crie uma senha segura" minlength="6" autocomplete="new-password" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input id="showPass" class="toggle" type="checkbox" />
+            <label for="showPass" style="margin:0;color:#cbd5e1;">Mostrar senha</label>
+          </div>
+          <div style="font-size:12px;color:rgba(148,163,184,.85);">
+            mínimo 6 caracteres
+          </div>
+        </div>
+
+        <button id="submitBtn" class="btn" type="submit">Criar conta</button>
+      </form>
+
+      <div id="msg" class="msg"></div>
+
+      <div id="postActions" class="actions" style="display:none;">
+        <button id="copyBtn" class="btnSecondary" type="button">Copiar client_id</button>
+        <button id="goDashBtn" class="btnSecondary" type="button">Ir para o dashboard</button>
+      </div>
+
+      <div class="foot">
+        Ao criar a conta, você concorda em usar o sistema para testes.
+        Seus dados ficam no seu banco do Render.
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ✅ Ajuste aqui se o seu dashboard estiver em outro endereço (ex: Static Site)
+    const DASHBOARD_URL = "https://qualificador-leads-ia.onrender.com/dashboard.html";
+    const API_BASE = "https://qualificador-leads-i-a.onrender.com";
+
+    const form = document.getElementById("onboardingForm");
+    const msg = document.getElementById("msg");
+    const btn = document.getElementById("submitBtn");
+    const showPass = document.getElementById("showPass");
+    const passwordInput = document.getElementById("password");
+
+    const postActions = document.getElementById("postActions");
+    const copyBtn = document.getElementById("copyBtn");
+    const goDashBtn = document.getElementById("goDashBtn");
+
+    let lastClientId = "";
+
+    showPass.addEventListener("change", () => {
+      passwordInput.type = showPass.checked ? "text" : "password";
+    });
+
+    function setMessage(text, type){
+      msg.className = "msg show" + (type ? " " + type : "");
+      msg.innerHTML = text;
+    }
+
+    function setLoading(isLoading){
+      btn.disabled = isLoading;
+      btn.textContent = isLoading ? "Criando..." : "Criar conta";
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById("email").value.trim();
+      const password = passwordInput.value;
+
+      if (!email || !password || password.length < 6) {
+        setMessage("⚠️ Preencha email e uma senha com pelo menos 6 caracteres.", "error");
+        return;
+      }
+
+      setLoading(true);
+      postActions.style.display = "none";
+      lastClientId = "";
+
+      try{
+        const body = new URLSearchParams();
+        body.set("email", email);
+        body.set("password", password);
+
+        const res = await fetch(`${API_BASE}/criar_cliente`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body
+        });
+
+        const text = await res.text();
+
+        if (res.status === 200) {
+          // O backend retorna HTML contendo o client_id. Vamos extrair pelo padrão "<b>client_id</b>: ..."
+          const match = text.match(/client_id<\/b>\s*:\s*([a-z0-9_]+)/i);
+          lastClientId = match ? match[1] : "";
+
+          if (lastClientId) {
+            localStorage.setItem("client_id", lastClientId);
+            setMessage(`✅ Conta criada! <br/>Seu <b>client_id</b>: <code style="background:rgba(2,6,23,.35);padding:2px 6px;border-radius:8px;border:1px solid rgba(148,163,184,.18);">${lastClientId}</code>`, "success");
+            postActions.style.display = "flex";
+          } else {
+            setMessage("✅ Conta criada! (Não consegui ler o client_id automaticamente. Abra o dashboard e faça login.)", "success");
+          }
+        } else if (res.status === 409) {
+          setMessage("⚠️ Esse usuário já existe. Tente outro email ou faça login.", "error");
+        } else {
+          setMessage(`❌ Erro ao criar conta. <br/><span style="color:rgba(148,163,184,.9)">${text}</span>`, "error");
+        }
+
+      } catch(err){
+        setMessage("❌ Falha de conexão. Verifique o backend (Render) e tente novamente.", "error");
+      } finally{
+        setLoading(false);
+      }
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      if (!lastClientId) return;
+      try{
+        await navigator.clipboard.writeText(lastClientId);
+        setMessage("📋 client_id copiado!", "success");
+      } catch {
+        setMessage("Não consegui copiar automaticamente. Selecione e copie manualmente.", "error");
+      }
+    });
+
+    goDashBtn.addEventListener("click", () => {
+      // Se seu dashboard pede client_id, você já salvou no localStorage.
+      window.location.href = DASHBOARD_URL;
+    });
+  </script>
 </body>
 </html>
