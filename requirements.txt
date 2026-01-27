@@ -6,5 +6,10 @@ gunicorn
 numpy
 werkzeug
 psycopg2-binary
+<<<<<<< HEAD
+psycopg2
 requests
-
+=======
+requests
+psycopg2
+>>>>>>> 7816622 (upgrade 1: top origens + hot leads hoje)
