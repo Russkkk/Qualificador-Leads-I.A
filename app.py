@@ -6,734 +6,88 @@ import re
 import math
 import random
 import string
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
-import psycopg2
-from psycopg2.extras import RealDictCursor, RealDictRow
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
+
+import psycopg2
+import psycopg2.extras
+
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 
-# -----------------------------
-# Config
-# -----------------------------
-DATABASE_URL: Optional[str] = os.environ.get("DATABASE_URL")  # required on Render
-DEFAULT_THRESHOLD: float = float(os.environ.get("DEFAULT_THRESHOLD", "0.7"))
-FALLBACK_PROB: float = float(os.environ.get("FALLBACK_PROB", "0.35"))
 
-# Minimum labeled examples
-MIN_LABELED_TO_TRAIN: int = int(os.environ.get("MIN_LABELED_TO_TRAIN", "4"))  # 2 de cada classe recomendado
-MIN_LABELED_TO_AUTO_THRESHOLD: int = int(os.environ.get("MIN_LABELED_TO_AUTO_THRESHOLD", "10"))
-
-# Demo protection
-DEMO_KEY: str = (os.environ.get("DEMO_KEY", "") or "").strip()
-
+# =========================
+# App / Config
+# =========================
 app = Flask(__name__)
-CORS(app)  # se quiser restringir: CORS(app, origins=[...])
 
-# -----------------------------
-# DB helpers
-# -----------------------------
-def get_conn() -> psycopg2.extensions.connection:
+# ✅ CORS: libera o seu Static Site (Render) e também localhost para testes
+CORS(app, resources={r"/*": {"origins": [
+    "https://qualificador-leads-ia.onrender.com",
+    "http://localhost",
+    "http://127.0.0.1",
+    "*"
+]}})
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DEMO_KEY = (os.getenv("DEMO_KEY") or "").strip()
+
+# Parâmetros padrões
+DEFAULT_LIMIT = 200
+MIN_LABELED_TO_TRAIN = 4  # 2 de cada classe recomendado
+
+# Threshold default (pode ser ajustado por /auto_threshold)
+DEFAULT_THRESHOLD = 0.35
+
+
+# =========================
+# Helpers
+# =========================
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def _json_ok(payload: Dict[str, Any], code: int = 200):
+    payload.setdefault("ok", True)
+    return jsonify(payload), code
+
+def _json_err(msg: str, code: int = 400, **extra):
+    payload = {"ok": False, "error": msg}
+    payload.update(extra)
+    return jsonify(payload), code
+
+def _db_required():
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL não configurada. Defina no Render (Environment) ou no seu ambiente local.")
-    # Render Postgres normalmente exige SSL
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+        raise RuntimeError("DATABASE_URL não configurada.")
 
+def db_conn():
+    _db_required()
+    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
-def init_db() -> None:
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Users table
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            client_id TEXT PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-
-    # Leads table
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS leads (
-            id SERIAL PRIMARY KEY,
-            client_id TEXT NOT NULL,
-            tempo_site DOUBLE PRECISION NOT NULL,
-            paginas_visitadas INTEGER NOT NULL,
-            clicou_preco INTEGER NOT NULL,
-            virou_cliente INTEGER NOT NULL DEFAULT -1, -- -1 pendente, 0 negado, 1 convertido
-            probabilidade DOUBLE PRECISION,
-            nome TEXT,
-            telefone TEXT,
-            email_lead TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_leads_client_id ON leads (client_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_leads_client_status ON leads (client_id, virou_cliente)")
-
-    # Client settings (threshold)
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS client_settings (
-            client_id TEXT PRIMARY KEY,
-            threshold DOUBLE PRECISION NOT NULL,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """
-    )
-
-    conn.commit()
-    conn.close()
-
-
-def get_threshold(cur, client_id: str) -> Optional[float]:
-    cur.execute("SELECT threshold FROM client_settings WHERE client_id=%s", (client_id,))
-    row = cur.fetchone()
-    return float(row[0]) if row else None
-
-
-def set_threshold(cur, client_id: str, threshold: float) -> None:
-    cur.execute(
-        """
-        INSERT INTO client_settings (client_id, threshold, updated_at)
-        VALUES (%s, %s, NOW())
-        ON CONFLICT (client_id)
-        DO UPDATE SET threshold=EXCLUDED.threshold, updated_at=NOW()
-        """,
-        (client_id, float(threshold)),
-    )
-
-
-def slugify_client_id(email: str) -> str:
-    base = (email.split("@")[0] if "@" in email else email).strip().lower()
-    base = re.sub(r"[^a-z0-9_]+", "_", base)
-    base = re.sub(r"_+", "_", base).strip("_")
-    return base or "cliente"
-
-
-def ensure_unique_client_id(cur, base_id: str) -> str:
-    candidate = base_id
-    i = 2
-    while True:
-        cur.execute("SELECT 1 FROM users WHERE client_id=%s", (candidate,))
-        if not cur.fetchone():
-            return candidate
-        candidate = f"{base_id}_{i}"
-        i += 1
-
-
-# -----------------------------
-# ML helpers
-# -----------------------------
-def train_model_for_client(cur, client_id: str, max_rows: int = 5000):
-    """Train model on labeled leads (virou_cliente in 0/1)."""
-    cur.execute(
-        """
-        SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
-        FROM leads
-        WHERE client_id=%s AND virou_cliente IN (0,1)
-        ORDER BY id DESC
-        LIMIT %s
-        """,
-        (client_id, max_rows),
-    )
-    rows = cur.fetchall()
-    labeled_count = len(rows)
-
-    if labeled_count < MIN_LABELED_TO_TRAIN:
-        return None, None, {
-            "can_train": False,
-            "reason": f"Poucos exemplos rotulados. Recomendo no mínimo {MIN_LABELED_TO_TRAIN} (2 de cada classe) para começar.",
-            "labeled_count": labeled_count,
-            "classes": [],
-        }
-
-    y = np.array([float(r[3]) for r in rows], dtype=float)
-    classes = sorted(list(set(y.tolist())))
-    if len(classes) < 2:
-        return None, None, {
-            "can_train": False,
-            "reason": "Só existe 1 classe rotulada (apenas 0 ou apenas 1).",
-            "labeled_count": labeled_count,
-            "classes": classes,
-        }
-
-    X = np.array([[float(r[0]), float(r[1]), float(r[2])] for r in rows], dtype=float)
-
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X)
-
-    model = LogisticRegression(max_iter=300)
-    model.fit(Xs, y)
-
-    return model, scaler, {
-        "can_train": True,
-        "reason": "Modelo treinado com sucesso.",
-        "labeled_count": labeled_count,
-        "classes": classes,
-    }
-
-
-def iso_utc(dt: Any) -> Any:
-    if dt and isinstance(dt, datetime):
-        return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return dt
-
-
-# -----------------------------
-# Routes
-# -----------------------------
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok"}), 200
-
-
-@app.post("/criar_cliente")
-def criar_cliente():
-    email = (request.form.get("email") or "").strip().lower()
-    password = (request.form.get("password") or "").strip()
-
-    if not email or not password:
-        return "Email e senha são obrigatórios.", 400
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("SELECT client_id FROM users WHERE email=%s", (email,))
-    if cur.fetchone():
-        conn.close()
-        return "Usuário já existe.", 409
-
-    base_id = slugify_client_id(email)
-    client_id = ensure_unique_client_id(cur, base_id)
-
-    pw_hash = generate_password_hash(password)
-    cur.execute(
-        "INSERT INTO users (client_id, email, password_hash) VALUES (%s,%s,%s)",
-        (client_id, email, pw_hash),
-    )
-
-    conn.commit()
-    conn.close()
-
-    return f"""
-    <html><body style="font-family:Arial">
-      <h2>Conta criada ✅</h2>
-      <p><b>client_id</b>: {client_id}</p>
-      <p>Abra o dashboard (Static Site) e use esse client_id.</p>
-    </body></html>
-    """, 200
-
-
-@app.post("/login")
-def login():
-    data = request.get_json(force=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    password = (data.get("password") or "").strip()
-
-    if not email or not password:
-        return jsonify({"error": "Email e senha são obrigatórios."}), 400
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT client_id, password_hash FROM users WHERE email=%s", (email,))
-    row = cur.fetchone()
-    conn.close()
-
-    if not row:
-        return jsonify({"error": "Credenciais inválidas."}), 401
-
-    client_id, pw_hash = row[0], row[1]
-    if not check_password_hash(pw_hash, password):
-        return jsonify({"error": "Credenciais inválidas."}), 401
-
-    return jsonify({"ok": True, "client_id": client_id}), 200
-
-
-@app.post("/prever")
-def prever():
-    data = request.get_json(force=True) or {}
-    client_id = (data.get("client_id") or "").strip()
-    if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
-
+def _safe_int(x, default=0):
     try:
-        tempo_site = float(data.get("tempo_site"))
-        paginas_visitadas = int(data.get("paginas_visitadas"))
-        clicou_preco = int(data.get("clicou_preco"))
+        return int(x)
     except Exception:
-        return jsonify({"error": "Campos inválidos: tempo_site, paginas_visitadas, clicou_preco"}), 400
+        return default
 
-    nome = (data.get("nome") or "").strip() or None
-    telefone = (data.get("telefone") or "").strip() or None
-    email_lead = (data.get("email_lead") or "").strip() or None
+def _safe_float(x, default=None):
+    try:
+        return float(x)
+    except Exception:
+        return default
 
-    conn = get_conn()
-    cur = conn.cursor()
-
-    model, scaler, train_status = train_model_for_client(cur, client_id)
-
-    if model is None:
-        prob = float(FALLBACK_PROB)
-        modelo_treinado = False
-        fallback_usado = True
-        threshold = float(DEFAULT_THRESHOLD)
-    else:
-        X = np.array([[tempo_site, paginas_visitadas, clicou_preco]], dtype=float)
-        Xs = scaler.transform(X)
-        prob = float(model.predict_proba(Xs)[0, 1])
-        modelo_treinado = True
-        fallback_usado = False
-
-        th_saved = get_threshold(cur, client_id)
-        threshold = float(th_saved) if th_saved is not None else float(DEFAULT_THRESHOLD)
-
-    lead_quente = bool(prob >= threshold)
-
-    cur.execute(
-        """
-        INSERT INTO leads (
-            client_id, tempo_site, paginas_visitadas, clicou_preco, virou_cliente,
-            probabilidade, nome, telefone, email_lead
-        )
-        VALUES (%s,%s,%s,%s,-1,%s,%s,%s,%s)
-        RETURNING id
-        """,
-        (client_id, tempo_site, paginas_visitadas, clicou_preco, prob, nome, telefone, email_lead),
-    )
-    lead_id = cur.fetchone()[0]
-
-    conn.commit()
-    conn.close()
-
-    return jsonify(
-        {
-            "ok": True,
-            "lead_id": lead_id,
-            "probabilidade_de_compra": prob,
-            "lead_quente": lead_quente,
-            "threshold_usado": threshold,
-            "modelo_treinado": modelo_treinado,
-            "fallback_usado": fallback_usado,
-            "treino_status": train_status,
-        }
-    ), 200
-
-
-@app.get("/dashboard_data")
-def dashboard_data():
-    client_id = (request.args.get("client_id") or "").strip()
-    if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
-
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute(
-        """
-        SELECT
-          COUNT(*) AS total_leads,
-          SUM(CASE WHEN virou_cliente = 1 THEN 1 ELSE 0 END) AS convertidos,
-          SUM(CASE WHEN virou_cliente = 0 THEN 1 ELSE 0 END) AS negados,
-          SUM(CASE WHEN virou_cliente NOT IN (0,1) THEN 1 ELSE 0 END) AS pendentes
-        FROM leads
-        WHERE client_id = %s
-        """,
-        (client_id,),
-    )
-    summary = cur.fetchone() or {}
-
-    cur.execute(
-        """
-        SELECT id, tempo_site, paginas_visitadas, clicou_preco, virou_cliente,
-               probabilidade, nome, telefone, email_lead, created_at
-        FROM leads
-        WHERE client_id=%s
-        ORDER BY id DESC
-        LIMIT 200
-        """,
-        (client_id,),
-    )
-    dados: List[RealDictRow] = cur.fetchall()
-    conn.close()
-
-    for d in dados:
-        d["created_at"] = iso_utc(d.get("created_at"))
-
-    return jsonify(
-        {
-            "total_leads": int(summary.get("total_leads") or 0),
-            "convertidos": int(summary.get("convertidos") or 0),
-            "negados": int(summary.get("negados") or 0),
-            "pendentes": int(summary.get("pendentes") or 0),
-            "dados": dados,
-        }
-    ), 200
-
-
-@app.post("/confirmar_venda")
-def confirmar_venda():
-    data = request.get_json(force=True) or {}
-    client_id = (data.get("client_id") or "").strip()
-    lead_id = data.get("lead_id")
-
-    if not client_id or lead_id is None:
-        return jsonify({"error": "client_id e lead_id são obrigatórios"}), 400
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE leads SET virou_cliente=1 WHERE client_id=%s AND id=%s", (client_id, int(lead_id)))
-    updated = cur.rowcount
-    conn.commit()
-    conn.close()
-
-    if updated == 0:
-        return jsonify({"ok": False, "reason": "Lead não encontrado"}), 404
-    return jsonify({"ok": True}), 200
-
-
-@app.post("/negar_venda")
-def negar_venda():
-    data = request.get_json(force=True) or {}
-    client_id = (data.get("client_id") or "").strip()
-    lead_id = data.get("lead_id")
-
-    if not client_id or lead_id is None:
-        return jsonify({"error": "client_id e lead_id são obrigatórios"}), 400
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE leads SET virou_cliente=0 WHERE client_id=%s AND id=%s", (client_id, int(lead_id)))
-    updated = cur.rowcount
-    conn.commit()
-    conn.close()
-
-    if updated == 0:
-        return jsonify({"ok": False, "reason": "Lead não encontrado"}), 404
-    return jsonify({"ok": True}), 200
-
-
-@app.get("/debug_model")
-def debug_model():
-    client_id = (request.args.get("client_id") or "").strip()
-    if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
-
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute(
-        """
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN virou_cliente = 1 THEN 1 ELSE 0 END) AS convertidos,
-          SUM(CASE WHEN virou_cliente = 0 THEN 1 ELSE 0 END) AS negados,
-          SUM(CASE WHEN virou_cliente NOT IN (0,1) THEN 1 ELSE 0 END) AS pendentes
-        FROM leads
-        WHERE client_id=%s
-        """,
-        (client_id,),
-    )
-    s = cur.fetchone() or {}
-
-    cur.execute(
-        """
-        SELECT id, tempo_site, paginas_visitadas, clicou_preco, virou_cliente,
-               probabilidade, nome, telefone, email_lead, created_at
-        FROM leads
-        WHERE client_id=%s AND virou_cliente IN (0,1)
-        ORDER BY id DESC
-        LIMIT 10
-        """,
-        (client_id,),
-    )
-    last_labeled = cur.fetchall()
-
-    cur.execute(
-        """
-        SELECT id, tempo_site, paginas_visitadas, clicou_preco, virou_cliente,
-               probabilidade, nome, telefone, email_lead, created_at
-        FROM leads
-        WHERE client_id=%s AND virou_cliente NOT IN (0,1)
-        ORDER BY id DESC
-        LIMIT 10
-        """,
-        (client_id,),
-    )
-    last_pending = cur.fetchall()
-
-    cur.execute(
-        """
-        SELECT DISTINCT virou_cliente
-        FROM leads
-        WHERE client_id=%s AND virou_cliente IN (0,1)
-        ORDER BY virou_cliente
-        """,
-        (client_id,),
-    )
-    classes = [float(r["virou_cliente"]) for r in cur.fetchall()]
-
-    total = int(s.get("total") or 0)
-    convertidos = int(s.get("convertidos") or 0)
-    negados = int(s.get("negados") or 0)
-    pendentes = int(s.get("pendentes") or 0)
-    labeled_count = convertidos + negados
-
-    can_train = labeled_count >= MIN_LABELED_TO_TRAIN and (0.0 in classes and 1.0 in classes)
-    if total == 0:
-        reason = "Sem leads no banco ainda."
-    elif not (0.0 in classes and 1.0 in classes):
-        reason = "Precisa ter exemplos rotulados das duas classes (0 e 1)."
-    elif labeled_count < MIN_LABELED_TO_TRAIN:
-        reason = f"Poucos exemplos rotulados. Recomendo no mínimo {MIN_LABELED_TO_TRAIN} (2 de cada classe) para começar."
-    else:
-        reason = "Pronto para treinar."
-
-    for d in last_labeled:
-        d["created_at"] = iso_utc(d.get("created_at"))
-    for d in last_pending:
-        d["created_at"] = iso_utc(d.get("created_at"))
-
-    conn.close()
-
-    return jsonify(
-        {
-            "client_id": client_id,
-            "total_recentes_considerados": total,
-            "convertidos": convertidos,
-            "negados": negados,
-            "pendentes": pendentes,
-            "labeled_count": labeled_count,
-            "classes_rotuladas": classes,
-            "can_train": bool(can_train),
-            "reason": reason,
-            "last_labeled": last_labeled,
-            "last_pending": last_pending,
-        }
-    ), 200
-
-
-@app.get("/recalc_pending")
-def recalc_pending():
-    client_id = (request.args.get("client_id") or "").strip()
-    limit = int(request.args.get("limit", "200"))
-    if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    model, scaler, train_status = train_model_for_client(cur, client_id)
-    if model is None:
-        conn.close()
-        return jsonify({"ok": False, **train_status}), 400
-
-    cur.execute(
-        """
-        SELECT id, tempo_site, paginas_visitadas, clicou_preco
-        FROM leads
-        WHERE client_id=%s AND virou_cliente NOT IN (0,1)
-        ORDER BY id DESC
-        LIMIT %s
-        """,
-        (client_id, limit),
-    )
-    pending = cur.fetchall()
-
-    if not pending:
-        conn.close()
-        return jsonify({"ok": True, "updated": 0, "reason": "Não há leads pendentes para recalcular."}), 200
-
-    ids = [int(p[0]) for p in pending]
-    Xp = np.array([[float(p[1]), float(p[2]), float(p[3])] for p in pending], dtype=float)
-    Xps = scaler.transform(Xp)
-    probs = model.predict_proba(Xps)[:, 1].astype(float)
-
-    cur.executemany(
-        "UPDATE leads SET probabilidade=%s WHERE client_id=%s AND id=%s",
-        [(float(probs[i]), client_id, ids[i]) for i in range(len(ids))],
-    )
-
-    conn.commit()
-    conn.close()
-
-    return jsonify(
-        {
-            "ok": True,
-            "updated": len(ids),
-            "limit": limit,
-            "min_prob": float(np.min(probs)),
-            "max_prob": float(np.max(probs)),
-            "sample": [{"id": ids[i], "prob": float(probs[i])} for i in range(min(5, len(ids)))],
-        }
-    ), 200
-
-
-@app.post("/auto_threshold")
-def auto_threshold():
-    data = request.get_json(force=True) or {}
-    client_id = (data.get("client_id") or "").strip()
-    if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
-        FROM leads
-        WHERE client_id=%s AND virou_cliente IN (0,1)
-        ORDER BY id DESC
-        LIMIT 5000
-        """,
-        (client_id,),
-    )
-    rows = cur.fetchall()
-
-    if len(rows) < MIN_LABELED_TO_AUTO_THRESHOLD:
-        conn.close()
-        return jsonify(
-            {
-                "ok": False,
-                "reason": f"Poucos exemplos rotulados. Recomendo pelo menos {MIN_LABELED_TO_AUTO_THRESHOLD} para threshold automático.",
-                "labeled_count": len(rows),
-            }
-        ), 400
-
-    y = np.array([float(r[3]) for r in rows], dtype=float)
-    classes = sorted(list(set(y.tolist())))
-    if len(classes) < 2:
-        conn.close()
-        return jsonify({"ok": False, "reason": "Precisa ter 0 e 1 rotulados.", "classes": classes}), 400
-
-    X = np.array([[float(r[0]), float(r[1]), float(r[2])] for r in rows], dtype=float)
-
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X)
-
-    model = LogisticRegression(max_iter=300)
-    model.fit(Xs, y)
-
-    probs = model.predict_proba(Xs)[:, 1].astype(float)
-
-    best = {"threshold": float(DEFAULT_THRESHOLD), "f1": -1.0, "precision": 0.0, "recall": 0.0}
-    for t in np.arange(0.05, 0.96, 0.05):
-        pred = (probs >= t).astype(int)
-        p = float(precision_score(y, pred, zero_division=0))
-        r = float(recall_score(y, pred, zero_division=0))
-        f = float(f1_score(y, pred, zero_division=0))
-        if f > best["f1"]:
-            best = {"threshold": float(t), "f1": float(f), "precision": p, "recall": r}
-
-    set_threshold(cur, client_id, best["threshold"])
-    conn.commit()
-    conn.close()
-
-    return jsonify({"ok": True, "client_id": client_id, **best}), 200
-
-
-@app.get("/metrics")
-def metrics():
-    """
-    Métrica simples (precision/recall/f1) usando split de treino/teste em rotulados.
-    """
-    client_id = (request.args.get("client_id") or "").strip()
-    if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
-
-    test_size = float(request.args.get("test_size", "0.2"))
-
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT tempo_site, paginas_visitadas, clicou_preco, virou_cliente
-        FROM leads
-        WHERE client_id = %s AND virou_cliente IN (0,1)
-        ORDER BY id DESC
-        LIMIT 5000
-        """,
-        (client_id,),
-    )
-    rows = cur.fetchall()
-    conn.close()
-
-    if len(rows) < 20:
-        return jsonify({"ok": False, "reason": "Poucos rotulados (recomendo >= 20).", "labeled_count": len(rows)}), 400
-
-    X = np.array([[r[0], r[1], r[2]] for r in rows], dtype=float)
-    y = np.array([int(r[3]) for r in rows], dtype=int)
-
-    pos = int((y == 1).sum())
-    neg = int((y == 0).sum())
-    if pos < 2 or neg < 2:
-        return jsonify({"ok": False, "reason": "Precisa de pelo menos 2 positivos e 2 negados.", "positivos": pos, "negados": neg}), 400
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
-    )
-
-    scaler = StandardScaler()
-    Xtr = scaler.fit_transform(X_train)
-    Xte = scaler.transform(X_test)
-
-    model = LogisticRegression(max_iter=200)
-    model.fit(Xtr, y_train)
-
-    probs = model.predict_proba(Xte)[:, 1]
-
-    # usa threshold salvo se existir
-    conn = get_conn()
-    cur = conn.cursor()
-    th_saved = get_threshold(cur, client_id)
-    conn.close()
-    threshold = float(th_saved) if th_saved is not None else float(DEFAULT_THRESHOLD)
-
-    pred = (probs >= threshold).astype(int)
-
-    precision = float(precision_score(y_test, pred, zero_division=0))
-    recall = float(recall_score(y_test, pred, zero_division=0))
-    f1 = float(f1_score(y_test, pred, zero_division=0))
-
-    tn, fp, fn, tp = confusion_matrix(y_test, pred, labels=[0, 1]).ravel()
-
-    return jsonify(
-        {
-            "ok": True,
-            "client_id": client_id,
-            "labeled_count": int(len(rows)),
-            "positivos": pos,
-            "negados": neg,
-            "test_size": test_size,
-            "threshold_usado": threshold,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "tp": int(tp),
-            "fp": int(fp),
-            "tn": int(tn),
-            "fn": int(fn),
-        }
-    ), 200
-
-
-# -----------------------------
-# Product v0.1 (LeadRank): Insights + Demo seed (protected)
-# -----------------------------
 def _require_demo_key():
     """
     Protect demo-only endpoints. Accepts key via:
@@ -753,108 +107,586 @@ def _require_demo_key():
         return False, "Chave DEMO_KEY inválida."
     return True, ""
 
+def _ensure_schema():
+    """
+    Cria tabelas mínimas necessárias para Postgres.
+    Executa com IF NOT EXISTS.
+    """
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS leads (
+                id SERIAL PRIMARY KEY,
+                client_id TEXT NOT NULL,
+                nome TEXT,
+                email_lead TEXT,
+                telefone TEXT,
+                tempo_site INTEGER,
+                paginas_visitadas INTEGER,
+                clicou_preco INTEGER,
+                probabilidade DOUBLE PRECISION,
+                virou_cliente DOUBLE PRECISION,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """)
+            cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_client_created ON leads(client_id, created_at DESC);
+            """)
+            cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_leads_client_label ON leads(client_id, virou_cliente);
+            """)
 
-def _sigmoid(z: float) -> float:
-    try:
-        return 1.0 / (1.0 + math.exp(-z))
-    except OverflowError:
-        return 0.0 if z < 0 else 1.0
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS thresholds (
+                client_id TEXT PRIMARY KEY,
+                threshold DOUBLE PRECISION NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """)
 
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS model_meta (
+                client_id TEXT PRIMARY KEY,
+                can_train BOOLEAN NOT NULL DEFAULT FALSE,
+                labeled_count INTEGER NOT NULL DEFAULT 0,
+                classes_rotuladas TEXT NOT NULL DEFAULT '[]',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """)
+        conn.commit()
+
+def _get_threshold(client_id: str) -> float:
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT threshold FROM thresholds WHERE client_id=%s", (client_id,))
+            row = cur.fetchone()
+            if row and row.get("threshold") is not None:
+                return float(row["threshold"])
+    return DEFAULT_THRESHOLD
+
+def _set_threshold(client_id: str, threshold: float):
+    threshold = float(threshold)
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO thresholds (client_id, threshold, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (client_id)
+                DO UPDATE SET threshold=EXCLUDED.threshold, updated_at=NOW()
+            """, (client_id, threshold))
+        conn.commit()
+
+def _fetch_recent_leads(client_id: str, limit: int = DEFAULT_LIMIT) -> List[Dict[str, Any]]:
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT *
+                FROM leads
+                WHERE client_id=%s
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (client_id, limit))
+            rows = cur.fetchall()
+            return rows or []
+
+def _fetch_all_leads(client_id: str, limit: int = 500) -> List[Dict[str, Any]]:
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT *
+                FROM leads
+                WHERE client_id=%s
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (client_id, limit))
+            return cur.fetchall() or []
+
+def _count_status(rows: List[Dict[str, Any]]) -> Tuple[int, int, int]:
+    convertidos = sum(1 for r in rows if r.get("virou_cliente") == 1 or r.get("virou_cliente") == 1.0)
+    negados = sum(1 for r in rows if r.get("virou_cliente") == 0 or r.get("virou_cliente") == 0.0)
+    pendentes = len(rows) - convertidos - negados
+    return convertidos, negados, pendentes
+
+def _features_from_row(r: Dict[str, Any]) -> np.ndarray:
+    # mesmas features usadas no projeto
+    tempo = _safe_int(r.get("tempo_site"), 0)
+    paginas = _safe_int(r.get("paginas_visitadas"), 0)
+    clicou = _safe_int(r.get("clicou_preco"), 0)
+    return np.array([tempo, paginas, clicou], dtype=float)
+
+def _train_pipeline(X: np.ndarray, y: np.ndarray) -> Pipeline:
+    # pipeline simples e robusto
+    pipe = Pipeline(steps=[
+        ("scaler", StandardScaler()),
+        ("lr", LogisticRegression(max_iter=200, solver="lbfgs"))
+    ])
+    pipe.fit(X, y)
+    return pipe
+
+def _get_labeled_rows(client_id: str) -> List[Dict[str, Any]]:
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT *
+                FROM leads
+                WHERE client_id=%s AND virou_cliente IS NOT NULL
+                ORDER BY created_at DESC
+            """, (client_id,))
+            return cur.fetchall() or []
+
+def _can_train(labeled_rows: List[Dict[str, Any]]) -> Tuple[bool, str, List[float]]:
+    if len(labeled_rows) < MIN_LABELED_TO_TRAIN:
+        classes = sorted(list({float(r["virou_cliente"]) for r in labeled_rows if r.get("virou_cliente") is not None}))
+        return False, f"Poucos exemplos rotulados. Recomendo no mínimo {MIN_LABELED_TO_TRAIN} (2 de cada classe) para começar.", classes
+    classes = sorted(list({float(r["virou_cliente"]) for r in labeled_rows if r.get("virou_cliente") is not None}))
+    if len(classes) < 2:
+        return False, "Precisa de exemplos das duas classes (convertido e negado) para treinar.", classes
+    return True, "", classes
+
+def _predict_for_rows(pipe: Pipeline, rows: List[Dict[str, Any]]) -> List[float]:
+    if not rows:
+        return []
+    X = np.vstack([_features_from_row(r) for r in rows])
+    # probabilidade da classe 1
+    probs = pipe.predict_proba(X)[:, 1]
+    return probs.tolist()
+
+def _update_probabilities(client_id: str, ids: List[int], probs: List[float]) -> int:
+    if not ids:
+        return 0
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            for lead_id, p in zip(ids, probs):
+                cur.execute("""
+                    UPDATE leads SET probabilidade=%s
+                    WHERE client_id=%s AND id=%s
+                """, (float(p), client_id, int(lead_id)))
+        conn.commit()
+    return len(ids)
+
+def _compute_precision_recall(rows: List[Dict[str, Any]], threshold: float) -> Dict[str, float]:
+    """
+    Usa rows rotulados (virou_cliente 0/1) e probabilidade para métricas simples.
+    """
+    y_true = []
+    y_pred = []
+    for r in rows:
+        y = r.get("virou_cliente")
+        p = r.get("probabilidade")
+        if y is None or p is None:
+            continue
+        y_true.append(1 if float(y) == 1.0 else 0)
+        y_pred.append(1 if float(p) >= threshold else 0)
+
+    if not y_true:
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+
+    tp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 1 and yp == 1)
+    fp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 0 and yp == 1)
+    fn = sum(1 for yt, yp in zip(y_true, y_pred) if yt == 1 and yp == 0)
+
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) else 0.0
+    return {"precision": float(precision), "recall": float(recall), "f1": float(f1)}
+
+def _best_threshold(rows: List[Dict[str, Any]]) -> float:
+    """
+    Busca threshold que maximiza F1 em uma grade simples.
+    """
+    candidates = [i/100 for i in range(5, 96, 5)]  # 0.05..0.95
+    best_t = DEFAULT_THRESHOLD
+    best_f1 = -1.0
+    for t in candidates:
+        m = _compute_precision_recall(rows, t)
+        if m["f1"] > best_f1:
+            best_f1 = m["f1"]
+            best_t = t
+    return float(best_t)
+
+
+# =========================
+# Boot schema on import (safe)
+# =========================
+try:
+    _ensure_schema()
+except Exception:
+    # Em Render, se DATABASE_URL não estiver setado ainda, o app pode subir e /health responde.
+    pass
+
+
+# =========================
+# Routes
+# =========================
+@app.get("/")
+def root():
+    return jsonify({"ok": True, "service": "LeadRank backend", "ts": _iso(_now_utc())})
+
+@app.get("/health")
+def health():
+    # Não falha mesmo se DB off, mas avisa
+    db_ok = bool(DATABASE_URL)
+    return jsonify({"ok": True, "db_configured": db_ok, "ts": _iso(_now_utc())})
+
+@app.get("/metrics")
+def metrics():
+    """
+    Métricas gerais simples do sistema (para debug/monitoramento).
+    """
+    if not DATABASE_URL:
+        return _json_ok({"db": False, "reason": "DATABASE_URL ausente"})
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM leads;")
+            total = int(cur.fetchone()["total"])
+            cur.execute("SELECT COUNT(*) AS labeled FROM leads WHERE virou_cliente IS NOT NULL;")
+            labeled = int(cur.fetchone()["labeled"])
+            cur.execute("SELECT COUNT(*) AS pending FROM leads WHERE virou_cliente IS NULL;")
+            pending = int(cur.fetchone()["pending"])
+
+    return _json_ok({
+        "db": True,
+        "total_leads": total,
+        "labeled": labeled,
+        "pending": pending,
+        "ts": _iso(_now_utc())
+    })
+
+@app.post("/criar_cliente")
+def criar_cliente():
+    """
+    Mantido por compatibilidade com seu front antigo.
+    Aqui pode só validar/retornar ok (workspace é client_id).
+    """
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    # cria meta se não existir
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO model_meta (client_id, can_train, labeled_count, classes_rotuladas, updated_at)
+                VALUES (%s, FALSE, 0, '[]', NOW())
+                ON CONFLICT (client_id) DO NOTHING
+            """, (client_id,))
+        conn.commit()
+
+    return _json_ok({"client_id": client_id})
+
+@app.post("/prever")
+def prever():
+    """
+    Recebe features e retorna probabilidade estimada.
+    Também grava o lead no banco (com probabilidade).
+    """
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    nome = (data.get("nome") or "").strip()
+    email = (data.get("email_lead") or data.get("email") or "").strip()
+    telefone = (data.get("telefone") or "").strip()
+
+    tempo_site = _safe_int(data.get("tempo_site"), 0)
+    paginas_visitadas = _safe_int(data.get("paginas_visitadas"), 0)
+    clicou_preco = _safe_int(data.get("clicou_preco"), 0)
+
+    # prob inicial simples até treinar: função heurística
+    # (o treino real entra via /recalc_pending)
+    base = 0.10
+    base += min(tempo_site / 400, 0.25)
+    base += min(paginas_visitadas / 10, 0.25)
+    base += 0.20 if clicou_preco else 0.0
+    prob = max(0.02, min(0.98, base))
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO leads
+                  (client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco, probabilidade, virou_cliente, created_at)
+                VALUES
+                  (%s,%s,%s,%s,%s,%s,%s,%s,NULL,NOW())
+                RETURNING id, created_at
+            """, (client_id, nome, email, telefone, tempo_site, paginas_visitadas, clicou_preco, float(prob)))
+            row = cur.fetchone()
+        conn.commit()
+
+    return _json_ok({
+        "client_id": client_id,
+        "lead_id": int(row["id"]),
+        "probabilidade": float(prob),
+        "created_at": _iso(row["created_at"])
+    })
+
+@app.get("/dashboard_data")
+def dashboard_data():
+    """
+    Dados para dashboard (últimos 200, já com probabilidade).
+    """
+    client_id = (request.args.get("client_id") or "").strip()
+    limit = _safe_int(request.args.get("limit"), DEFAULT_LIMIT)
+    limit = max(10, min(limit, 1000))
+
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    rows = _fetch_recent_leads(client_id, limit=limit)
+    convertidos, negados, pendentes = _count_status(rows)
+
+    # últimos rotulados e pendentes (para debug)
+    labeled = [r for r in rows if r.get("virou_cliente") is not None]
+    pending = [r for r in rows if r.get("virou_cliente") is None]
+
+    def normalize_row(r):
+        rr = dict(r)
+        rr["created_at"] = _iso(rr.get("created_at"))
+        return rr
+
+    return _json_ok({
+        "client_id": client_id,
+        "convertidos": convertidos,
+        "negados": negados,
+        "pendentes": pendentes,
+        "dados": [normalize_row(r) for r in rows],
+        "last_labeled": [normalize_row(r) for r in labeled[:10]],
+        "last_pending": [normalize_row(r) for r in pending[:10]],
+        "total_recentes_considerados": len(rows)
+    })
+
+@app.post("/confirmar_venda")
+def confirmar_venda():
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    lead_id = _safe_int(data.get("lead_id"), 0)
+
+    if not client_id or not lead_id:
+        return _json_err("client_id e lead_id obrigatórios")
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE leads
+                SET virou_cliente=1
+                WHERE client_id=%s AND id=%s
+            """, (client_id, lead_id))
+        conn.commit()
+
+    return _json_ok({"client_id": client_id, "lead_id": lead_id, "virou_cliente": 1})
+
+@app.post("/negar_venda")
+def negar_venda():
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    lead_id = _safe_int(data.get("lead_id"), 0)
+
+    if not client_id or not lead_id:
+        return _json_err("client_id e lead_id obrigatórios")
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE leads
+                SET virou_cliente=0
+                WHERE client_id=%s AND id=%s
+            """, (client_id, lead_id))
+        conn.commit()
+
+    return _json_ok({"client_id": client_id, "lead_id": lead_id, "virou_cliente": 0})
+
+@app.get("/recalc_pending")
+def recalc_pending():
+    """
+    Recalcula a probabilidade para leads pendentes com base no modelo treinado nos rotulados.
+    """
+    client_id = (request.args.get("client_id") or "").strip()
+    limit = _safe_int(request.args.get("limit"), 500)
+    limit = max(10, min(limit, 5000))
+
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    labeled = _get_labeled_rows(client_id)
+    can, reason, classes = _can_train(labeled)
+    if not can:
+        return _json_ok({
+            "client_id": client_id,
+            "can_train": False,
+            "classes_rotuladas": classes,
+            "labeled_count": len(labeled),
+            "reason": reason,
+            "updated": 0
+        })
+
+    X = np.vstack([_features_from_row(r) for r in labeled])
+    y = np.array([1 if float(r["virou_cliente"]) == 1.0 else 0 for r in labeled], dtype=int)
+    pipe = _train_pipeline(X, y)
+
+    # pendentes mais recentes
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, tempo_site, paginas_visitadas, clicou_preco
+                FROM leads
+                WHERE client_id=%s AND virou_cliente IS NULL
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (client_id, limit))
+            pending = cur.fetchall() or []
+
+    ids = [int(r["id"]) for r in pending]
+    probs = _predict_for_rows(pipe, pending)
+    updated = _update_probabilities(client_id, ids, probs)
+
+    return _json_ok({
+        "client_id": client_id,
+        "can_train": True,
+        "classes_rotuladas": classes,
+        "labeled_count": len(labeled),
+        "reason": "",
+        "updated": updated,
+        "min_prob": float(min(probs)) if probs else None,
+        "max_prob": float(max(probs)) if probs else None,
+        "sample": [{"id": ids[i], "prob": float(probs[i])} for i in range(min(5, len(ids)))]
+    })
+
+@app.post("/auto_threshold")
+def auto_threshold():
+    """
+    Calcula e salva threshold que maximiza F1 para o client_id (com base em rotulados).
+    """
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    labeled = _get_labeled_rows(client_id)
+    can, reason, classes = _can_train(labeled)
+    if not can:
+        return _json_ok({
+            "client_id": client_id,
+            "can_train": False,
+            "classes_rotuladas": classes,
+            "labeled_count": len(labeled),
+            "reason": reason,
+            "threshold": _get_threshold(client_id),
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0
+        })
+
+    # garante probs atualizadas para rotulados também (se faltando)
+    missing = [r for r in labeled if r.get("probabilidade") is None]
+    if missing:
+        X = np.vstack([_features_from_row(r) for r in labeled])
+        y = np.array([1 if float(r["virou_cliente"]) == 1.0 else 0 for r in labeled], dtype=int)
+        pipe = _train_pipeline(X, y)
+        ids = [int(r["id"]) for r in missing]
+        probs = _predict_for_rows(pipe, missing)
+        _update_probabilities(client_id, ids, probs)
+
+        # refetch labeled
+        labeled = _get_labeled_rows(client_id)
+
+    best_t = _best_threshold(labeled)
+    _set_threshold(client_id, best_t)
+
+    m = _compute_precision_recall(labeled, best_t)
+    return _json_ok({
+        "client_id": client_id,
+        "threshold": float(best_t),
+        "precision": float(m["precision"]),
+        "recall": float(m["recall"]),
+        "f1": float(m["f1"])
+    })
 
 @app.get("/insights")
 def insights():
     """
-    Insights simples:
-      - conversão por faixa (quente/morno/frio) usando probabilidade armazenada
-      - série diária (últimos N dias) de convertidos/negados
+    Retorna insights para a tela de métricas:
+    - conversão por faixa de probabilidade
+    - série diária (últimos X dias)
     """
     client_id = (request.args.get("client_id") or "").strip()
-    days = int(request.args.get("days") or "14")
-    limit = int(request.args.get("limit") or "2000")
+    days = _safe_int(request.args.get("days"), 14)
+    days = max(7, min(days, 90))
+
     if not client_id:
-        return jsonify({"error": "client_id é obrigatório"}), 400
+        return _json_err("client_id obrigatório")
 
-    days = max(3, min(days, 60))
-    limit = max(50, min(limit, 20000))
+    threshold = _get_threshold(client_id)
 
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    # janela de tempo
+    since = _now_utc() - timedelta(days=days)
 
-    cur.execute(
-        """
-        SELECT id, probabilidade, virou_cliente, created_at
-        FROM leads
-        WHERE client_id = %s AND virou_cliente IN (0,1)
-        ORDER BY created_at DESC
-        LIMIT %s
-        """,
-        (client_id, limit),
-    )
-    labeled = cur.fetchall()
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT probabilidade, virou_cliente, created_at
+                FROM leads
+                WHERE client_id=%s AND created_at >= %s
+                ORDER BY created_at ASC
+            """, (client_id, since))
+            rows = cur.fetchall() or []
 
-    def band(prob: Any) -> str:
-        if prob is None:
-            return "cold"
-        try:
-            p = float(prob)
-        except Exception:
-            return "cold"
-        if p >= 0.70:
-            return "hot"
-        if p >= 0.40:
-            return "warm"
-        return "cold"
+    # bands
+    bands_def = [
+        ("0-0.2", 0.0, 0.2),
+        ("0.2-0.4", 0.2, 0.4),
+        ("0.4-0.6", 0.4, 0.6),
+        ("0.6-0.8", 0.6, 0.8),
+        ("0.8-1.0", 0.8, 1.01),
+    ]
 
-    bands: Dict[str, Dict[str, Any]] = {
-        "hot": {"count": 0, "converted": 0, "denied": 0},
-        "warm": {"count": 0, "converted": 0, "denied": 0},
-        "cold": {"count": 0, "converted": 0, "denied": 0},
-    }
+    bands = []
+    for name, lo, hi in bands_def:
+        subset = [r for r in rows if r.get("probabilidade") is not None and lo <= float(r["probabilidade"]) < hi]
+        labeled = [r for r in subset if r.get("virou_cliente") is not None]
+        conv = sum(1 for r in labeled if float(r["virou_cliente"]) == 1.0)
+        total = len(labeled)
+        rate = (conv / total) if total else 0.0
+        bands.append({
+            "band": name,
+            "labeled": total,
+            "converted": conv,
+            "conversion_rate": round(float(rate), 4)
+        })
 
-    conv = 0
-    den = 0
-    for r in labeled:
-        b = band(r.get("probabilidade"))
-        bands[b]["count"] += 1
-        if int(r["virou_cliente"]) == 1:
-            bands[b]["converted"] += 1
-            conv += 1
+    # series daily
+    by_day = {}
+    for r in rows:
+        dt = r.get("created_at")
+        if not dt:
+            continue
+        day = dt.date().isoformat()
+        by_day.setdefault(day, {"day": day, "total": 0, "converted": 0, "denied": 0, "pending": 0})
+        by_day[day]["total"] += 1
+        vc = r.get("virou_cliente")
+        if vc is None:
+            by_day[day]["pending"] += 1
+        elif float(vc) == 1.0:
+            by_day[day]["converted"] += 1
         else:
-            bands[b]["denied"] += 1
-            den += 1
+            by_day[day]["denied"] += 1
 
-    for k in bands:
-        c = int(bands[k]["count"])
-        cr = (bands[k]["converted"] / c) if c else 0.0
-        bands[k]["conversion_rate"] = round(float(cr), 4)
+    series = [by_day[k] for k in sorted(by_day.keys())]
 
-    overall_rate = (conv / (conv + den)) if (conv + den) else 0.0
+    # overall
+    labeled_all = [r for r in rows if r.get("virou_cliente") is not None]
+    conv_all = sum(1 for r in labeled_all if float(r["virou_cliente"]) == 1.0)
+    overall_rate = (conv_all / len(labeled_all)) if labeled_all else 0.0
 
-    cur.execute(
-        """
-        SELECT (created_at::date) AS d,
-               SUM(CASE WHEN virou_cliente = 1 THEN 1 ELSE 0 END) AS converted,
-               SUM(CASE WHEN virou_cliente = 0 THEN 1 ELSE 0 END) AS denied
-        FROM leads
-        WHERE client_id = %s
-          AND virou_cliente IN (0,1)
-          AND created_at >= (NOW() - (%s || ' days')::interval)
-        GROUP BY d
-        ORDER BY d ASC
-        """,
-        (client_id, days),
-    )
-    series = cur.fetchall()
-    conn.close()
-
-    return jsonify(
+    return _json_ok(
         {
-            "ok": True,
             "client_id": client_id,
+            "threshold": float(threshold),
             "overall": {
-                "labeled": int(conv + den),
-                "converted": int(conv),
-                "denied": int(den),
+                "window_total": len(rows),
+                "window_labeled": len(labeled_all),
+                "window_converted": conv_all,
                 "conversion_rate": round(float(overall_rate), 4),
             },
             "bands": bands,
@@ -880,104 +712,61 @@ def seed_demo():
     n = max(10, min(n, 300))
 
     if not client_id:
-        suffix = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+        suffix = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(4))
         client_id = f"demo_{suffix}"
 
-    conn = get_conn()
-    cur = conn.cursor()
+    # gera registros
+    inserted = 0
+    conv = 0
+    neg = 0
 
-    # Ensure a user exists
-    cur.execute("SELECT 1 FROM users WHERE client_id = %s", (client_id,))
-    if cur.fetchone() is None:
-        demo_email = f"{client_id}@leadrank.demo"
-        demo_password_hash = generate_password_hash("demo1234")
-        cur.execute(
-            """
-            INSERT INTO users (client_id, email, password_hash)
-            VALUES (%s,%s,%s)
-            ON CONFLICT (client_id) DO NOTHING
-            """,
-            (client_id, demo_email, demo_password_hash),
-        )
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            for _ in range(n):
+                tempo_site = random.randint(15, 420)
+                paginas = random.randint(1, 10)
+                clicou_preco = random.choice([0, 1])
 
-    converted_target = int(round(n * 0.40))
-    denied_target = int(round(n * 0.35))
-    pending_target = n - converted_target - denied_target
+                # prob coerente com features
+                base = 0.08
+                base += min(tempo_site / 450, 0.25)
+                base += min(paginas / 12, 0.25)
+                base += 0.22 if clicou_preco else 0.0
+                prob = max(0.03, min(0.97, base + random.uniform(-0.05, 0.05)))
 
-    def mk_lead(label: int):
-        if label == 1:
-            tempo = random.randint(90, 260)
-            pages = random.randint(4, 12)
-            click = 1 if random.random() < 0.75 else 0
-        elif label == 0:
-            tempo = random.randint(10, 120)
-            pages = random.randint(1, 6)
-            click = 1 if random.random() < 0.20 else 0
-        else:
-            tempo = random.randint(20, 220)
-            pages = random.randint(1, 10)
-            click = 1 if random.random() < 0.35 else 0
+                # rótulo parcial (para simular treino)
+                label = random.choices([None, 1.0, 0.0], weights=[0.45, 0.30, 0.25])[0]
+                if label == 1.0:
+                    conv += 1
+                elif label == 0.0:
+                    neg += 1
 
-        z = -2.0 + 0.012 * tempo + 0.22 * pages + 1.25 * click + random.uniform(-0.6, 0.6)
-        prob = _sigmoid(z)
+                nome = "Demo " + "".join(random.choice(string.ascii_uppercase) for _ in range(4))
+                email = "demo@leadrank.local"
+                telefone = "11999990000"
 
-        name = random.choice(
-            [
-                "Ana", "Bruno", "Carla", "Diego", "Edu", "Fernanda", "Gabi", "Helena",
-                "Igor", "João", "Katia", "Lucas", "Mariana", "Nina", "Otávio", "Paula",
-                "Renato", "Sofia", "Tiago", "Vitor",
-            ]
-        )
-        phone = "11" + "".join(random.choice(string.digits) for _ in range(9))
-        email = f"{name.lower()}.{random.randint(10,999)}@lead.com"
-        return tempo, pages, click, label, prob, name, phone, email
+                cur.execute("""
+                    INSERT INTO leads
+                      (client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco, probabilidade, virou_cliente, created_at)
+                    VALUES
+                      (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                """, (client_id, nome, email, telefone, tempo_site, paginas, clicou_preco, float(prob), label))
+                inserted += 1
+        conn.commit()
 
-    rows = []
-    for _ in range(converted_target):
-        rows.append(mk_lead(1))
-    for _ in range(denied_target):
-        rows.append(mk_lead(0))
-    for _ in range(pending_target):
-        rows.append(mk_lead(-1))
-    random.shuffle(rows)
-
-    cur.executemany(
-        """
-        INSERT INTO leads (
-            client_id, tempo_site, paginas_visitadas, clicou_preco, virou_cliente,
-            probabilidade, nome, telefone, email_lead
-        )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-        [(client_id, *r) for r in rows],
-    )
-
-    conn.commit()
-    conn.close()
-
-    return jsonify(
-        {
-            "ok": True,
-            "client_id": client_id,
-            "inserted": n,
-            "converted": converted_target,
-            "denied": denied_target,
-            "pending": pending_target,
-        }
-    ), 200
+    return jsonify({
+        "ok": True,
+        "client_id": client_id,
+        "inserted": inserted,
+        "converted": conv,
+        "denied": neg,
+        "pending": inserted - conv - neg
+    }), 200
 
 
-# -----------------------------
-# Boot
-# -----------------------------
-# On Render with gunicorn, __main__ isn't executed.
-# We'll init DB at import time safely.
-try:
-    init_db()
-except Exception as e:
-    print("DB init warning:", str(e))
-
-
+# =========================
+# Run local
+# =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5000"))
+    port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
