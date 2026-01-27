@@ -337,104 +337,107 @@
     </main>
   </div>
 
-  <script>
-    // ✅ Ajuste aqui se o seu dashboard estiver em outro endereço (ex: Static Site)
-    const DASHBOARD_URL = "https://qualificador-leads-ia.onrender.com/dashboard.html";
-    const API_BASE = "https://qualificador-leads-i-a.onrender.com";
+ <script>
+  // ✅ Ajuste aqui se o seu dashboard estiver em outro endereço (ex: Static Site)
+  // Se o dashboard é o index.html do Static Site, use só a raiz:
+  const DASHBOARD_URL = "https://qualificador-leads-ia.onrender.com";
+  const API_BASE = "https://qualificador-leads-i-a.onrender.com";
 
-    const form = document.getElementById("onboardingForm");
-    const msg = document.getElementById("msg");
-    const btn = document.getElementById("submitBtn");
-    const showPass = document.getElementById("showPass");
-    const passwordInput = document.getElementById("password");
+  const form = document.getElementById("onboardingForm");
+  const msg = document.getElementById("msg");
+  const btn = document.getElementById("submitBtn");
+  const showPass = document.getElementById("showPass");
+  const passwordInput = document.getElementById("password");
 
-    const postActions = document.getElementById("postActions");
-    const copyBtn = document.getElementById("copyBtn");
-    const goDashBtn = document.getElementById("goDashBtn");
+  const postActions = document.getElementById("postActions");
+  const copyBtn = document.getElementById("copyBtn");
+  const goDashBtn = document.getElementById("goDashBtn");
 
-    let lastClientId = "";
+  let lastClientId = "";
 
-    showPass.addEventListener("change", () => {
-      passwordInput.type = showPass.checked ? "text" : "password";
-    });
+  showPass.addEventListener("change", () => {
+    passwordInput.type = showPass.checked ? "text" : "password";
+  });
 
-    function setMessage(text, type){
-      msg.className = "msg show" + (type ? " " + type : "");
-      msg.innerHTML = text;
+  function setMessage(text, type){
+    msg.className = "msg show" + (type ? " " + type : "");
+    msg.innerHTML = text;
+  }
+
+  function setLoading(isLoading){
+    btn.disabled = isLoading;
+    btn.textContent = isLoading ? "Criando..." : "Criar conta";
+  }
+
+  // gera client_id "vendável" a partir do email + sufixo curto
+  function makeClientIdFromEmail(email){
+    const base = (email.split("@")[0] || "cliente")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 18);
+
+    const suffix = Math.random().toString(36).slice(2, 6); // 4 chars
+    return `${base}_${suffix}`;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const email = document.getElementById("email").value.trim();
+    const password = passwordInput.value;
+
+    if (!email || !password || password.length < 6) {
+      setMessage("⚠️ Preencha email e uma senha com pelo menos 6 caracteres.", "error");
+      return;
     }
 
-    function setLoading(isLoading){
-      btn.disabled = isLoading;
-      btn.textContent = isLoading ? "Criando..." : "Criar conta";
+    setLoading(true);
+    postActions.style.display = "none";
+    lastClientId = "";
+
+    try{
+      const client_id = makeClientIdFromEmail(email);
+
+      const res = await fetch(`${API_BASE}/criar_cliente`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id })
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data && data.ok) {
+        lastClientId = data.client_id || client_id;
+
+        localStorage.setItem("client_id", lastClientId);
+        setMessage(`✅ Conta criada! <br/>Seu <b>client_id</b>: <code style="background:rgba(2,6,23,.35);padding:2px 6px;border-radius:8px;border:1px solid rgba(148,163,184,.18);">${lastClientId}</code>`, "success");
+        postActions.style.display = "flex";
+      } else {
+        const errMsg = (data && data.error) ? data.error : "Erro ao criar conta.";
+        setMessage(`❌ ${errMsg}`, "error");
+      }
+
+    } catch(err){
+      setMessage("❌ Falha de conexão. Verifique o backend (Render) e tente novamente.", "error");
+    } finally{
+      setLoading(false);
     }
+  });
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+  copyBtn.addEventListener("click", async () => {
+    if (!lastClientId) return;
+    try{
+      await navigator.clipboard.writeText(lastClientId);
+      setMessage("📋 client_id copiado!", "success");
+    } catch {
+      setMessage("Não consegui copiar automaticamente. Selecione e copie manualmente.", "error");
+    }
+  });
 
-      const email = document.getElementById("email").value.trim();
-      const password = passwordInput.value;
-
-      if (!email || !password || password.length < 6) {
-        setMessage("⚠️ Preencha email e uma senha com pelo menos 6 caracteres.", "error");
-        return;
-      }
-
-      setLoading(true);
-      postActions.style.display = "none";
-      lastClientId = "";
-
-      try{
-        const body = new URLSearchParams();
-        body.set("email", email);
-        body.set("password", password);
-
-        const res = await fetch(`${API_BASE}/criar_cliente`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body
-        });
-
-        const text = await res.text();
-
-        if (res.status === 200) {
-          // O backend retorna HTML contendo o client_id. Vamos extrair pelo padrão "<b>client_id</b>: ..."
-          const match = text.match(/client_id<\/b>\s*:\s*([a-z0-9_]+)/i);
-          lastClientId = match ? match[1] : "";
-
-          if (lastClientId) {
-            localStorage.setItem("client_id", lastClientId);
-            setMessage(`✅ Conta criada! <br/>Seu <b>client_id</b>: <code style="background:rgba(2,6,23,.35);padding:2px 6px;border-radius:8px;border:1px solid rgba(148,163,184,.18);">${lastClientId}</code>`, "success");
-            postActions.style.display = "flex";
-          } else {
-            setMessage("✅ Conta criada! (Não consegui ler o client_id automaticamente. Abra o dashboard e faça login.)", "success");
-          }
-        } else if (res.status === 409) {
-          setMessage("⚠️ Esse usuário já existe. Tente outro email ou faça login.", "error");
-        } else {
-          setMessage(`❌ Erro ao criar conta. <br/><span style="color:rgba(148,163,184,.9)">${text}</span>`, "error");
-        }
-
-      } catch(err){
-        setMessage("❌ Falha de conexão. Verifique o backend (Render) e tente novamente.", "error");
-      } finally{
-        setLoading(false);
-      }
-    });
-
-    copyBtn.addEventListener("click", async () => {
-      if (!lastClientId) return;
-      try{
-        await navigator.clipboard.writeText(lastClientId);
-        setMessage("📋 client_id copiado!", "success");
-      } catch {
-        setMessage("Não consegui copiar automaticamente. Selecione e copie manualmente.", "error");
-      }
-    });
-
-    goDashBtn.addEventListener("click", () => {
-      // Se seu dashboard pede client_id, você já salvou no localStorage.
-      window.location.href = DASHBOARD_URL;
-    });
-  </script>
+  goDashBtn.addEventListener("click", () => {
+    window.location.href = DASHBOARD_URL;
+  });
+</script>
 </body>
 </html>
