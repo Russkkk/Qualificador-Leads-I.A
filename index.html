@@ -205,7 +205,65 @@
       .input, .select{ width: 100%; }
       .topbar{ top: 10px; }
     }
-  </style>
+  
+/* ==== DEMO_KEY Modal ==== */
+#demoKeyModal{
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.55);
+  z-index: 9999;
+}
+#demoKeyModal.show{ display: flex; }
+#demoKeyModal .dk-card{
+  width: min(520px, calc(100vw - 32px));
+  background: #111;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.55);
+}
+#demoKeyModal .dk-title{
+  font-weight: 700;
+  font-size: 16px;
+  margin: 0 0 8px 0;
+}
+#demoKeyModal .dk-msg{
+  opacity: .85;
+  font-size: 13px;
+  margin: 0 0 12px 0;
+  line-height: 1.4;
+}
+#demoKeyModal .dk-row{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+#demoKeyModal input{
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.06);
+  color: #fff;
+  outline: none;
+}
+#demoKeyModal .dk-actions{
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+#demoKeyModal button{
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+#demoKeyModal .dk-secondary{
+  opacity: .85;
+}
+</style>
 </head>
 <body>
   <div class="container">
@@ -505,15 +563,134 @@
     else sel.value = list[0];
   }
 
-  async function api(path, opts={}){
-    const url = BACKEND + path;
-    const res = await fetch(url, opts);
-    let data = null;
-    try{ data = await res.json(); } catch(e){}
-    if (!res.ok){
-      const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
-      throw new Error(msg);
+
+// ==== DEMO_KEY handling (no hardcode) ====
+const DEMO_KEY_STORAGE = "DEMO_KEY";
+
+function _getDemoKeyFromQuery(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const qk = qs.get("demo_key");
+    if (qk && qk.trim()){
+      localStorage.setItem(DEMO_KEY_STORAGE, qk.trim());
+      return qk.trim();
     }
+  }catch(e){}
+  return null;
+}
+
+function getSavedDemoKey(){
+  _getDemoKeyFromQuery();
+  const k = localStorage.getItem(DEMO_KEY_STORAGE);
+  return (k && k.trim()) ? k.trim() : null;
+}
+
+let _demoKeyPromise = null;
+
+function showDemoKeyModal(message){
+  const modal = document.getElementById("demoKeyModal");
+  const msgEl = document.getElementById("demoKeyMsg");
+  const input = document.getElementById("demoKeyInput");
+  if (!modal || !msgEl || !input) return;
+
+  msgEl.textContent = message || "Digite sua DEMO_KEY para continuar.";
+  input.value = getSavedDemoKey() || "";
+  modal.classList.add("show");
+  setTimeout(()=> input.focus(), 50);
+}
+
+function hideDemoKeyModal(){
+  const modal = document.getElementById("demoKeyModal");
+  if (modal) modal.classList.remove("show");
+}
+
+function ensureDemoKey(){
+  const existing = getSavedDemoKey();
+  if (existing) return Promise.resolve(existing);
+
+  if (_demoKeyPromise) return _demoKeyPromise;
+
+  showDemoKeyModal("Digite sua DEMO_KEY para continuar.");
+  _demoKeyPromise = new Promise((resolve) => {
+    window.__resolveDemoKey = (k) => {
+      _demoKeyPromise = null;
+      resolve(k);
+    };
+  });
+  return _demoKeyPromise;
+}
+
+function clearDemoKey(){
+  localStorage.removeItem(DEMO_KEY_STORAGE);
+}
+
+// wire modal buttons
+document.addEventListener("DOMContentLoaded", () => {
+  const saveBtn = document.getElementById("demoKeySave");
+  const cancelBtn = document.getElementById("demoKeyCancel");
+  const input = document.getElementById("demoKeyInput");
+
+  if (saveBtn){
+    saveBtn.addEventListener("click", () => {
+      const val = (input && input.value) ? input.value.trim() : "";
+      if (!val){
+        showDemoKeyModal("A DEMO_KEY é obrigatória.");
+        return;
+      }
+      localStorage.setItem(DEMO_KEY_STORAGE, val);
+      hideDemoKeyModal();
+      if (window.__resolveDemoKey) window.__resolveDemoKey(val);
+      window.__resolveDemoKey = null;
+    });
+  }
+
+  if (cancelBtn){
+    cancelBtn.addEventListener("click", () => {
+      hideDemoKeyModal();
+    });
+  }
+
+  if (input){
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveBtn && saveBtn.click();
+      if (e.key === "Escape") cancelBtn && cancelBtn.click();
+    });
+  }
+});
+
+async function api(path, opts={}){
+  const url = BACKEND + path;
+
+  const demoKey = await ensureDemoKey();
+
+  const hdrs = { ...(opts.headers || {}) };
+
+  // default JSON content-type when body is plain object / stringified json
+  if (!hdrs["Content-Type"] && !hdrs["content-type"]){
+    const isForm = (typeof FormData !== "undefined") && (opts.body instanceof FormData);
+    if (!isForm) hdrs["Content-Type"] = "application/json";
+  }
+
+  hdrs["x-demo-key"] = demoKey;
+
+  const res = await fetch(url, { ...opts, headers: hdrs });
+
+  let data = null;
+  try{ data = await res.json(); } catch(e){}
+
+  if (!res.ok){
+    const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
+
+    // If DEMO_KEY changed/invalid, force re-entry
+    if (res.status === 401 && String(msg).toLowerCase().includes("demo_key")){
+      clearDemoKey();
+      showDemoKeyModal("Sua DEMO_KEY mudou ou expirou. Digite novamente.");
+    }
+
+    throw new Error(msg);
+  }
+  return data;
+}
     return data;
   }
 
@@ -1042,5 +1219,21 @@ document.getElementById("drawerBody").innerHTML = rows.map(([k,v]) => `
   // Auto-load
   carregar();
 </script>
+
+  <!-- DEMO_KEY Modal -->
+  <div id="demoKeyModal" aria-hidden="true">
+    <div class="dk-card" role="dialog" aria-modal="true" aria-labelledby="demoKeyTitle">
+      <p class="dk-title" id="demoKeyTitle">Chave de acesso (DEMO_KEY)</p>
+      <p class="dk-msg" id="demoKeyMsg">Digite sua DEMO_KEY para continuar.</p>
+      <div class="dk-row">
+        <input id="demoKeyInput" type="password" placeholder="Ex: Leadrank#2026!x9" autocomplete="off" />
+      </div>
+      <div class="dk-actions">
+        <button class="dk-secondary" id="demoKeyCancel" type="button">Cancelar</button>
+        <button id="demoKeySave" type="button">Salvar</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
