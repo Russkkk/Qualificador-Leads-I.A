@@ -1,6 +1,7 @@
 # app.py - LeadRank / Qualificador de Leads IA (Render + Postgres)
-# Versão corrigida para bancos antigos onde clients.api_key foi criado como NOT NULL.
-# Estratégia: sempre inserir api_key (gerada) ao criar o client + migração tenta DROP NOT NULL.
+# Versão com auto-migração robusta para bancos antigos:
+# - clients: corrige api_key NOT NULL, usage_month, etc.
+# - leads: adiciona colunas faltantes (payload JSONB, probabilidade, score, etc.)
 
 import os
 import json
@@ -39,6 +40,10 @@ _DEMO_RL_MAX = 5
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 
+
+# -------------------------
+# Utils
+# -------------------------
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -84,11 +89,16 @@ def _get_api_key_from_headers() -> str:
 def _client_ip() -> str:
     return (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
 
+
+# -------------------------
+# Schema / Migrations
+# -------------------------
 def _ensure_schema():
     conn = _db()
     try:
         with conn:
             with conn.cursor() as cur:
+                # LEADS (create + migrate columns)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS leads (
                         id BIGSERIAL PRIMARY KEY,
@@ -104,6 +114,17 @@ def _ensure_schema():
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_leads_client_created ON leads(client_id, created_at DESC);")
 
+                # bancos antigos: leads pode existir sem essas colunas
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS client_id TEXT;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS probabilidade DOUBLE PRECISION;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS score INTEGER;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS label INTEGER;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS virou_cliente INTEGER;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
+
+                # CLIENTS (create + migrate columns)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS clients (
                         client_id TEXT PRIMARY KEY,
@@ -158,6 +179,10 @@ def _ensure_schema_once():
 def _before_any_request():
     _ensure_schema_once()
 
+
+# -------------------------
+# Client helpers / Auth
+# -------------------------
 def _ensure_client_row(client_id: str, plan: str = "trial"):
     if plan not in PLAN_CATALOG:
         plan = "trial"
@@ -168,7 +193,6 @@ def _ensure_client_row(client_id: str, plan: str = "trial"):
         try:
             with conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # IMPORTANTE: inserir api_key para não quebrar bancos onde api_key é NOT NULL
                     fresh_key = _gen_api_key(client_id)
                     cur.execute("""
                         INSERT INTO clients (client_id, api_key, plan, status, usage_month, leads_used_month, updated_at)
@@ -179,7 +203,6 @@ def _ensure_client_row(client_id: str, plan: str = "trial"):
                     cur.execute("SELECT * FROM clients WHERE client_id=%s FOR UPDATE", (client_id,))
                     row = cur.fetchone()
 
-                    # se existir mas api_key estiver vazio (caso raro), preencher
                     if not (row.get("api_key") or "").strip():
                         cur.execute("UPDATE clients SET api_key=%s, updated_at=NOW() WHERE client_id=%s", (fresh_key, client_id))
                         cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
@@ -208,6 +231,7 @@ def _require_client_auth(client_id: str):
     api_key = _get_api_key_from_headers()
     if not api_key:
         return False, None, "Missing X-API-KEY"
+
     conn = _db()
     try:
         with conn:
@@ -237,6 +261,10 @@ def _require_client_auth(client_id: str):
     finally:
         conn.close()
 
+
+# -------------------------
+# Routes
+# -------------------------
 @app.get("/")
 def root():
     return jsonify({"ok": True, "service": "LeadRank backend", "ts": _iso(_now_utc())})
@@ -290,71 +318,6 @@ def client_meta():
         "usage_month": row.get("usage_month") or _month_key(),
         "ts": _iso(_now_utc()),
     })
-
-@app.post("/set_plan")
-def set_plan():
-    if not _check_demo_key():
-        return _resp({"ok": False, "error": "Unauthorized (DEMO_KEY)"}, 403)
-
-    data = request.get_json(silent=True) or {}
-    client_id = (data.get("client_id") or "").strip()
-    plan = (data.get("plan") or "").strip().lower()
-    status = (data.get("status") or "").strip().lower()
-
-    if not client_id:
-        return _resp({"ok": False, "error": "client_id obrigatório"}, 400)
-    if plan and plan not in PLAN_CATALOG:
-        return _resp({"ok": False, "error": "plan inválido"}, 400)
-    if status and status not in ["active", "inactive"]:
-        return _resp({"ok": False, "error": "status inválido"}, 400)
-
-    row = _ensure_client_row(client_id, plan=plan or "trial")
-
-    conn = _db()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                sets = []
-                vals = []
-                if plan:
-                    sets.append("plan=%s"); vals.append(plan)
-                if status:
-                    sets.append("status=%s"); vals.append(status)
-                sets.append("updated_at=NOW()")
-                q = f"UPDATE clients SET {', '.join(sets)} WHERE client_id=%s"
-                vals.append(client_id)
-                cur.execute(q, tuple(vals))
-                cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
-                row2 = cur.fetchone()
-        return _resp({"ok": True, "client_id": client_id, "plan": row2.get("plan"), "status": row2.get("status")})
-    except (psycopg2.errors.UndefinedColumn, psycopg2.errors.NotNullViolation):
-        _ensure_schema()
-        return set_plan()
-    finally:
-        conn.close()
-
-@app.post("/demo_public")
-def demo_public():
-    ip = _client_ip()
-    now = time.time()
-
-    for k in list(_DEMO_RL.keys()):
-        t0, c = _DEMO_RL[k]
-        if now - t0 > _DEMO_RL_WINDOW_S:
-            del _DEMO_RL[k]
-
-    t0, c = _DEMO_RL.get(ip, (now, 0))
-    if now - t0 > _DEMO_RL_WINDOW_S:
-        t0, c = now, 0
-
-    if c >= _DEMO_RL_MAX:
-        return _resp({"ok": False, "error": "Rate limit demo. Tente mais tarde."}, 429)
-
-    _DEMO_RL[ip] = (t0, c + 1)
-
-    client_id = f"demo_{secrets.token_hex(2)}"
-    row = _ensure_client_row(client_id, plan="demo")
-    return _resp({"ok": True, "client_id": client_id, "api_key": row.get("api_key"), "plan": "demo"})
 
 @app.post("/prever")
 def prever():
@@ -420,6 +383,75 @@ def prever():
         return prever()
     finally:
         conn.close()
+
+@app.post("/set_plan")
+def set_plan():
+    if not _check_demo_key():
+        return _resp({"ok": False, "error": "Unauthorized (DEMO_KEY)"}, 403)
+
+    data = request.get_json(silent=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    plan = (data.get("plan") or "").strip().lower()
+    status = (data.get("status") or "").strip().lower()
+
+    if not client_id:
+        return _resp({"ok": False, "error": "client_id obrigatório"}, 400)
+    if plan and plan not in PLAN_CATALOG:
+        return _resp({"ok": False, "error": "plan inválido"}, 400)
+    if status and status not in ["active", "inactive"]:
+        return _resp({"ok": False, "error": "status inválido"}, 400)
+
+    _ensure_client_row(client_id, plan=plan or "trial")
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                sets = []
+                vals = []
+                if plan:
+                    sets.append("plan=%s"); vals.append(plan)
+                if status:
+                    sets.append("status=%s"); vals.append(status)
+                sets.append("updated_at=NOW()")
+
+                q = f"UPDATE clients SET {', '.join(sets)} WHERE client_id=%s"
+                vals.append(client_id)
+                cur.execute(q, tuple(vals))
+
+                cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
+                row = cur.fetchone()
+
+        return _resp({"ok": True, "client_id": client_id, "plan": row.get("plan"), "status": row.get("status")})
+    except (psycopg2.errors.UndefinedColumn, psycopg2.errors.NotNullViolation):
+        _ensure_schema()
+        return set_plan()
+    finally:
+        conn.close()
+
+@app.post("/demo_public")
+def demo_public():
+    ip = _client_ip()
+    now = time.time()
+
+    for k in list(_DEMO_RL.keys()):
+        t0, c = _DEMO_RL[k]
+        if now - t0 > _DEMO_RL_WINDOW_S:
+            del _DEMO_RL[k]
+
+    t0, c = _DEMO_RL.get(ip, (now, 0))
+    if now - t0 > _DEMO_RL_WINDOW_S:
+        t0, c = now, 0
+
+    if c >= _DEMO_RL_MAX:
+        return _resp({"ok": False, "error": "Rate limit demo. Tente mais tarde."}, 429)
+
+    _DEMO_RL[ip] = (t0, c + 1)
+
+    client_id = f"demo_{secrets.token_hex(2)}"
+    row = _ensure_client_row(client_id, plan="demo")
+    return _resp({"ok": True, "client_id": client_id, "api_key": row.get("api_key"), "plan": "demo"})
+
 
 if __name__ == "__main__":
     try:
