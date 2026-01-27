@@ -109,6 +109,7 @@
     .panelHeaderLeft{ display:flex; flex-direction:column; gap:2px; }
     .panelHeaderRight{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; justify-content:flex-end; }
     .pill{
+
       display:inline-flex; align-items:center; gap: 6px;
       padding: 6px 10px; border-radius: 999px;
       border: 1px solid rgba(255,255,255,0.14);
@@ -116,6 +117,8 @@
       font-size: 12px; color: rgba(255,255,255,0.85);
       white-space: nowrap;
     }
+.pill.warn{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.10)}
+.pill.danger{border-color:rgba(239,68,68,.55);background:rgba(239,68,68,.12)}
     .split{ display:grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; padding: 14px; }
     .split > .card{ box-shadow:none; }
     .chartWrap{ height: 260px; }
@@ -224,7 +227,7 @@
 
       <div class="planbar">
         <span class="pill" id="pillPlan">plano: —</span>
-        <a class="btn small" id="btnUpgrade" href="https://wa.me/5511999999999?text=Quero%20ativar%20meu%20plano%20do%20LeadRank" target="_blank" rel="noreferrer">⚡ Ativar plano</a>
+        <a class="btn small" id="btnUpgrade" href="https://wa.me/5511999999999?text=Quero%20ativar%20LeadRank%20(Starter%20R%2479%2C%20Pro%20R%24179%2C%20VIP%20R%24279)%20-%20meu%20workspace%20%C3%A9%3A%20" target="_blank" rel="noreferrer">⚡ Ativar plano</a>
       </div>
 </div>
         </div>
@@ -509,7 +512,30 @@
 
     try{
       const meta = await api(`/client_meta?client_id=${encodeURIComponent(clientId)}`);
-      pill.textContent = `plano: ${meta.plan || "—"}`;
+      const plan = (meta.plan || "—").toLowerCase();
+      const price = (meta.price_brl_month ?? null);
+      const used = (meta.leads_used_this_month ?? null);
+      const limit = (meta.lead_limit_month ?? null);
+
+      let parts = [`plano: ${plan}`];
+      if (price !== null) parts.push(`R$${price}/mês`);
+      if (limit !== null && used !== null) parts.push(`${used}/${limit} leads (mês)`);
+      pill.textContent = parts.join(" • ");
+
+      const up = document.getElementById("btnUpgrade");
+      if (up && up.href){
+        // garante que o link leve o workspace junto (pra facilitar fechamento no WhatsApp)
+        const base = up.href.split("%20workspace%20%C3%A9%3A%20")[0] + "%20workspace%20%C3%A9%3A%20";
+        up.href = base + encodeURIComponent(clientId);
+      }
+
+      // reforço visual se perto/estourado
+      pill.classList.remove("warn","danger");
+      if (limit !== null && used !== null){
+        const pct = limit > 0 ? (used/limit) : 0;
+        if (pct >= 1) pill.classList.add("danger");
+        else if (pct >= 0.8) pill.classList.add("warn");
+      }
     }catch(e){
       pill.textContent = "plano: —";
     }

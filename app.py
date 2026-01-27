@@ -28,6 +28,57 @@ from sklearn.pipeline import Pipeline
 # =========================
 app = Flask(__name__)
 
+
+# -----------------------------
+# Planos comerciais (BRL)
+# -----------------------------
+PLAN_CATALOG = {
+    # trial: usado no onboarding self-service (ex.: 7 dias/100 leads). Preço pode ser 0.
+    "trial":   {"price_brl_month": 0,   "lead_limit_month": 100,   "label": "Trial"},
+    "starter": {"price_brl_month": 79,  "lead_limit_month": 1000,  "label": "Starter"},
+    "pro":     {"price_brl_month": 179, "lead_limit_month": 5000,  "label": "Pro"},
+    "vip":     {"price_brl_month": 279, "lead_limit_month": 20000, "label": "VIP"},
+    "demo":    {"price_brl_month": 0,   "lead_limit_month": 30,    "label": "Demo"},
+}
+
+def _month_start_utc(dt: datetime) -> datetime:
+    dt = dt.astimezone(timezone.utc)
+    return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+def _lead_limit_for_plan(plan: str) -> Optional[int]:
+    return (PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"]).get("lead_limit_month"))  # type: ignore
+
+def _price_for_plan(plan: str) -> int:
+    return int(PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"]).get("price_brl_month", 0))
+
+def _count_leads_this_month(client_id: str) -> int:
+    start = _month_start_utc(_now_utc())
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM leads WHERE client_id=%s AND created_at >= %s", (client_id, start))
+            return int(cur.fetchone()[0] or 0)
+
+def _enforce_monthly_lead_limit_or_error(client_id: str) -> Optional[Response]:
+    row = _client_row(client_id)
+    if not row:
+        return _json_err("workspace não encontrado", 404)
+    plan = (row.get("plan") or "trial").strip().lower()
+    limit = _lead_limit_for_plan(plan)
+    # None => ilimitado (não usamos agora, mas mantém compatível)
+    if limit is None:
+        return None
+    used = _count_leads_this_month(client_id)
+    if used >= int(limit):
+        return jsonify({
+            "ok": False,
+            "error": "Limite mensal do plano atingido. Faça upgrade para continuar.",
+            "code": "plan_limit",
+            "plan": plan,
+            "used_this_month": used,
+            "limit_month": int(limit),
+            "price_brl_month": _price_for_plan(plan),
+        }), 402
+    return None
 # ✅ CORS: libera o seu Static Site (Render) e também localhost para testes
 CORS(app, resources={r"/*": {"origins": [
     "https://qualificador-leads-ia.onrender.com",
@@ -387,6 +438,9 @@ def criar_cliente():
     client_id = (data.get("client_id") or "").strip()
     plan = (data.get("plan") or "trial").strip().lower()
 
+    if plan not in PLAN_CATALOG:
+        plan = "trial"
+
     if not client_id:
         return _json_err("client_id obrigatório")
 
@@ -414,6 +468,11 @@ def prever():
     ok, msg = _require_api_key(client_id)
     if not ok:
         return _json_err(msg, 403)
+
+    # Limite mensal por plano (para vender SaaS / upgrade)
+    limit_err = _enforce_monthly_lead_limit_or_error(client_id)
+    if limit_err is not None:
+        return limit_err
 
     nome = (data.get("nome") or "").strip()
     email = (data.get("email_lead") or data.get("email") or "").strip()
@@ -453,21 +512,35 @@ def prever():
 
 @app.get("/client_meta")
 def client_meta():
-    """Metadados públicos do workspace (para UI)."""
+    """Metadados do workspace (para UI)."""
     client_id = (request.args.get("client_id") or "").strip()
     if not client_id:
         return _json_err("client_id obrigatório")
     row = _client_row(client_id)
     if not row:
         return _json_err("workspace não encontrado", 404)
+
+    plan = (row.get("plan") or "trial").strip().lower()
+    limit = _lead_limit_for_plan(plan)
+    used = _count_leads_this_month(client_id)
+
     return _json_ok({
         "client_id": row.get("client_id"),
-        "plan": row.get("plan"),
-        "status": row.get("status")
+        "plan": plan,
+        "status": row.get("status"),
+        "price_brl_month": _price_for_plan(plan),
+        "lead_limit_month": limit,
+        "leads_used_this_month": used
     })
 
 
 @app.get("/dashboard_data")
+
+@app.get("/plan_catalog")
+def plan_catalog():
+    """Catálogo público de planos (para UI)."""
+    return _json_ok({"plans": PLAN_CATALOG})
+
 def dashboard_data():
     """
     Dados para dashboard (últimos 200, já com probabilidade).
