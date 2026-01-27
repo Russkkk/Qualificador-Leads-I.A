@@ -356,7 +356,62 @@
     const DASHBOARD_URL = "https://qualificador-leads-ia.onrender.com/dashboard.html";
     const API_BASE = "https://qualificador-leads-i-a.onrender.com";
 
-    const form = document.getElementById("onboardingForm");
+    
+// ---------------- DEMO_KEY helpers (compartilhado com dashboard) ----------------
+function _getDemoKey(){
+  // 1) query param ?demo_key=...
+  const qs = new URLSearchParams(location.search);
+  const qk = qs.get('demo_key');
+  if (qk && qk.trim()){
+    localStorage.setItem('DEMO_KEY', qk.trim());
+    return qk.trim();
+  }
+  // 2) localStorage
+  const k = localStorage.getItem('DEMO_KEY');
+  if (k && k.trim()) return k.trim();
+  return null;
+}
+
+function _openDemoKeyModal(prefill=""){
+  const modal = document.getElementById("demoKeyModal");
+  const input = document.getElementById("demoKeyInput");
+  const hint = document.getElementById("demoKeyHint");
+  hint.textContent = prefill ? "Key detectada na URL. Confirme ou altere." : "";
+  input.value = prefill || "";
+  modal.style.display = "flex";
+  setTimeout(()=>input.focus(), 50);
+}
+
+function _closeDemoKeyModal(){
+  const modal = document.getElementById("demoKeyModal");
+  modal.style.display = "none";
+}
+
+function _ensureDemoKey(){
+  const k = _getDemoKey();
+  if (!k) _openDemoKeyModal("");
+  return k;
+}
+
+(function initDemoKeyUI(){
+  // se vier demo_key na URL, já salva
+  _getDemoKey();
+
+  const modal = document.getElementById("demoKeyModal");
+  const closeBtn = document.getElementById("demoKeyClose");
+  const saveBtn  = document.getElementById("demoKeySave");
+  const input    = document.getElementById("demoKeyInput");
+
+  closeBtn?.addEventListener("click", _closeDemoKeyModal);
+  modal?.addEventListener("click", (e)=>{ if (e.target === modal) _closeDemoKeyModal(); });
+  saveBtn?.addEventListener("click", ()=>{
+    const v = (input.value || "").trim();
+    if (!v){ alert("Informe a DEMO_KEY."); return; }
+    localStorage.setItem("DEMO_KEY", v);
+    _closeDemoKeyModal();
+  });
+})();
+const form = document.getElementById("onboardingForm");
     const msg = document.getElementById("msg");
     const btn = document.getElementById("submitBtn");
     const showPass = document.getElementById("showPass");
@@ -545,5 +600,22 @@
       window.location.href = DASHBOARD_URL;
     });
   </script>
+<!-- DEMO_KEY Modal (para manter o dashboard funcionando mesmo quando a key muda) -->
+<div id="demoKeyModal" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:9999;">
+  <div style="width:min(520px,92vw);background:#111;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5);">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <h3 style="margin:0;font-size:18px;">Digite sua DEMO_KEY</h3>
+      <button id="demoKeyClose" type="button" aria-label="Fechar" style="background:transparent;border:0;color:#fff;font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <p style="margin:10px 0 14px;opacity:.85;font-size:14px;">
+      Usamos a DEMO_KEY para acessar o dashboard e a API de demonstração. Se você mudou a key no Render, basta inserir a nova aqui.
+    </p>
+    <input id="demoKeyInput" placeholder="Ex: Leadrank#2026!x9" style="width:100%;padding:12px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:#0b0b0b;color:#fff;outline:none;font-size:14px;" />
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+      <button id="demoKeySave" type="button" style="padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:#fff;color:#111;font-weight:700;cursor:pointer;">Salvar</button>
+    </div>
+    <div id="demoKeyHint" style="margin-top:10px;font-size:12px;opacity:.75;"></div>
+  </div>
+</div>
 </body>
 </html>

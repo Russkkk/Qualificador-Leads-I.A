@@ -7,6 +7,29 @@
 <body>
   <h1>Pare de responder curiosos</h1>
   <p>Receba no WhatsApp só quem tem chance real de comprar.</p>
-  <button>Teste grátis por 7 dias</button>
+  <button id="startBtn">Teste grátis por 7 dias</button>
+<script>
+  function _getDemoKey(){
+    const qs = new URLSearchParams(location.search);
+    const qk = qs.get('demo_key');
+    if (qk && qk.trim()){
+      localStorage.setItem('DEMO_KEY', qk.trim());
+      return qk.trim();
+    }
+    const k = localStorage.getItem('DEMO_KEY');
+    if (k && k.trim()) return k.trim();
+    return null;
+  }
+  // salva demo_key se vier na URL
+  _getDemoKey();
+
+  const btn = document.getElementById('startBtn');
+  btn?.addEventListener('click', ()=>{
+    const k = _getDemoKey();
+    const next = new URL('onboarding.html', location.origin + location.pathname.replace(/\/[^\/]*$/, '/'));
+    if (k) next.searchParams.set('demo_key', k);
+    window.location.href = next.toString();
+  });
+</script>
 </body>
 </html>
