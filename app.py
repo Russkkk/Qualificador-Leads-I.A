@@ -97,6 +97,71 @@ def _month_key(dt: Optional[datetime] = None) -> str:
     dt = dt or _now_utc()
     return dt.strftime("%Y-%m")
 
+from zoneinfo import ZoneInfo
+
+_SP_TZ = ZoneInfo("America/Sao_Paulo")
+
+def _sp_today_bounds_utc() -> tuple[datetime, datetime]:
+    """Retorna (inicio_utc, fim_utc) do dia de hoje em America/Sao_Paulo."""
+    now_sp = datetime.now(_SP_TZ)
+    start_sp = now_sp.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_sp = start_sp.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return start_sp.astimezone(timezone.utc), end_sp.astimezone(timezone.utc)
+
+def _top_origens(client_id: str, days: int = 30, limit: int = 6):
+    """Top origens (últimos N dias) por quantidade de leads."""
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(NULLIF(TRIM(origem), ''), 'desconhecida') AS origem,
+                           COUNT(*)::int AS total
+                    FROM leads
+                    WHERE client_id=%s
+                      AND created_at >= (NOW() - (%s || ' days')::interval)
+                    GROUP BY 1
+                    ORDER BY total DESC, origem ASC
+                    LIMIT %s
+                    """,
+                    (client_id, int(days), int(limit)),
+                )
+                return cur.fetchall()
+    finally:
+        conn.close()
+
+def _hot_leads_today(client_id: str, limit: int = 20):
+    """Leads quentes de hoje (probabilidade>=0.70 ou score>=70)."""
+    start_utc, end_utc = _sp_today_bounds_utc()
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, nome, telefone, email_lead, origem,
+                           probabilidade, score, created_at, virou_cliente
+                    FROM leads
+                    WHERE client_id=%s
+                      AND created_at >= %s AND created_at <= %s
+                      AND (
+                            (probabilidade IS NOT NULL AND probabilidade >= 0.70)
+                            OR (score IS NOT NULL AND score >= 70)
+                          )
+                    ORDER BY COALESCE(probabilidade, score/100.0) DESC NULLS LAST,
+                             created_at DESC
+                    LIMIT %s
+                    """,
+                    (client_id, start_utc, end_utc, int(limit)),
+                )
+                rows = cur.fetchall()
+                for r in rows:
+                    r["created_at"] = _iso(r.get("created_at"))
+                return rows
+    finally:
+        conn.close()
+
 def _resp(payload: Dict[str, Any], code: int = 200):
     return jsonify(payload), code
 
@@ -832,6 +897,10 @@ def dashboard_data():
     rows = _fetch_recent_leads(client_id, limit=limit)
     convertidos, negados, pendentes = _count_status(rows)
 
+    # Premium (C1): Top origens (30d) + Hot leads de hoje (America/Sao_Paulo)
+    top_origens = _top_origens(client_id, days=30, limit=6)
+    hot_leads_today = _hot_leads_today(client_id, limit=20)
+
     def norm(r: Dict[str, Any]) -> Dict[str, Any]:
         rr = dict(r)
         rr["created_at"] = _iso(rr.get("created_at"))
@@ -842,6 +911,9 @@ def dashboard_data():
         "convertidos": convertidos,
         "negados": negados,
         "pendentes": pendentes,
+        "top_origens_30d": top_origens,
+        "hot_leads_today": hot_leads_today,
+        "hot_leads_today_tz": "America/Sao_Paulo",
         "dados": [norm(r) for r in rows],
         "total_recentes_considerados": len(rows),
     })

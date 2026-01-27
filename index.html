@@ -266,6 +266,19 @@
           <div class="hint">Baixa chance</div>
         </div>
 
+
+        <div class="card kpi">
+          <div class="value" id="kpiHotToday">0</div>
+          <div class="label">🔥 Quentes hoje</div>
+          <div class="hint">Dia atual (America/Sao_Paulo)</div>
+        </div>
+
+        <div class="card kpi">
+          <div class="value" id="kpiTopOrigem">—</div>
+          <div class="label">📍 Top origem (30d)</div>
+          <div class="hint" id="topOrigensHint">—</div>
+        </div>
+
         <div class="card panel">
           <div class="panelHeader">
             <div class="panelHeaderLeft">
@@ -777,6 +790,24 @@ document.getElementById("drawerBody").innerHTML = rows.map(([k,v]) => `
       }));
 
       updateHeader(summary);
+
+      // C1: Top origens (30d) e Hot leads de hoje
+      const hotToday = (data.hot_leads_today || []);
+      const topOrigens = (data.top_origens_30d || []);
+
+      const elHotToday = document.getElementById("kpiHotToday");
+      if (elHotToday) elHotToday.textContent = String(hotToday.length);
+
+      const elTop = document.getElementById("kpiTopOrigem");
+      const elHint = document.getElementById("topOrigensHint");
+      if (topOrigens.length){
+        if (elTop) elTop.textContent = topOrigens[0].origem;
+        if (elHint) elHint.textContent = topOrigens.map(o => `${o.origem}: ${o.total}`).join(" • ");
+      } else {
+        if (elTop) elTop.textContent = "—";
+        if (elHint) elHint.textContent = "Sem dados ainda";
+      }
+
       renderTable();
       renderChartDash(leads);
 
