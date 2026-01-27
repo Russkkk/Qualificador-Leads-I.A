@@ -397,6 +397,7 @@
     <div class="drawerFooter">
       <button class="btn good" id="dConfirm">✅ Virou cliente</button>
       <button class="btn danger" id="dDeny">❌ Não virou</button>
+      <button class="btn" id="dExplain">🧠 Explicar score</button>
       <a class="btn" id="dCall" href="#" target="_blank" rel="noreferrer">📞 Ligar</a>
       <a class="btn" id="dWhats" href="#" target="_blank" rel="noreferrer">💬 WhatsApp</a>
     </div>
@@ -405,44 +406,6 @@
 <script>
   // ✅ Backend oficial
   const BACKEND = "https://qualificador-leads-i-a.onrender.com";
-
-  // ===== Monetização / Upgrade =====
-  function openUpgradeModal(info){
-    const ws = localStorage.getItem("client_id") || "";
-    const base = "https://wa.me/5518988277992";
-    const build = (planLabel) => encodeURIComponent(
-      `Quero ativar o LeadRank (${planLabel}).\nWorkspace: ${ws}\nUso do mês: ${(info && info.used != null) ? info.used : "?"}/${(info && info.limit != null) ? info.limit : "?"}`
-    );
-
-    const s = document.getElementById("upStarter");
-    const p = document.getElementById("upPro");
-    const v = document.getElementById("upVip");
-    if (s) s.href = `${base}?text=${build("Starter R$79/mês")}`;
-    if (p) p.href = `${base}?text=${build("Pro R$179/mês")}`;
-    if (v) v.href = `${base}?text=${build("VIP R$279/mês")}`;
-
-    const modal = document.getElementById("upgradeModal");
-    if (modal) modal.style.display = "flex";
-  }
-
-  function closeUpgradeModal(){
-    const modal = document.getElementById("upgradeModal");
-    if (modal) modal.style.display = "none";
-  }
-
-  // Reset mensal (client-side): quando virar o mês, limpa caches locais e recarrega meta
-  function ensureMonthlyReset(){
-    const now = new Date();
-    const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const prev = localStorage.getItem("lr_month_key");
-    if (prev && prev !== key){
-      // limpe apenas chaves de UI/caches (não apaga client_id/api_key)
-      localStorage.removeItem("lr_meta_cache");
-      localStorage.removeItem("lr_leads_cache");
-    }
-    localStorage.setItem("lr_month_key", key);
-  }
-
 
   // UX bands
   const HOT_MIN  = 0.70;
@@ -531,21 +494,9 @@
 
   async function api(path, opts={}){
     const url = BACKEND + path;
-
-    // Injeta API Key em todas as chamadas (SaaS)
-    const apiKey = (localStorage.getItem("api_key") || "").trim();
-    const headers = Object.assign({}, (opts.headers || {}));
-    if (apiKey) headers["X-API-KEY"] = apiKey;
-    opts.headers = headers;
-
     const res = await fetch(url, opts);
     let data = null;
     try{ data = await res.json(); } catch(e){}
-    // Se estourou limite do plano, abre modal e interrompe a ação
-    if (res.status === 402 && data && data.code === "plan_limit"){
-      openUpgradeModal(data);
-      throw new Error("Limite do plano atingido");
-    }
     if (!res.ok){
       const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
       throw new Error(msg);
@@ -585,7 +536,11 @@
       ["Telefone", lead.telefone || "—"],
       ["Email", lead.email_lead || "—"]
     ];
-    document.getElementById("drawerBody").innerHTML = rows.map(([k,v]) => `
+        // reset do explain
+    const exBtn = document.getElementById("dExplain");
+    if (exBtn) { exBtn.disabled = false; exBtn.style.opacity = "1"; exBtn.textContent = "🧠 Explicar score"; }
+
+document.getElementById("drawerBody").innerHTML = rows.map(([k,v]) => `
       <div class="row"><div class="k">${k}</div><div class="v">${v}</div></div>
     `).join("");
 
@@ -612,6 +567,40 @@
     document.getElementById("drawerOverlay").style.display = "block";
     document.getElementById("drawer").style.transform = "translateX(0)";
   }
+
+
+  async function explainLead(lead){
+    try{
+      const clientId = getWorkspace();
+      if (!clientId) { toast("Workspace não definido."); return; }
+      const exBtn = document.getElementById("dExplain");
+      if (exBtn){ exBtn.disabled = true; exBtn.style.opacity = "0.7"; exBtn.textContent = "Carregando..."; }
+
+      const data = await api(`/lead_explain?client_id=${encodeURIComponent(clientId)}&lead_id=${encodeURIComponent(lead.id)}`);
+      const items = (data && data.explain) ? data.explain : [];
+      if (!items.length){ toast("Sem explicação disponível."); return; }
+
+      const html = `
+        <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.10);">
+          <div style="font-weight:800; margin-bottom:8px;">Por que esse score?</div>
+          ${items.map(it => `
+            <div class="row">
+              <div class="k">${it.factor}</div>
+              <div class="v">${(Number(it.delta||0)*100).toFixed(1)} pts • ${it.why||""}</div>
+            </div>
+          `).join("")}
+          <div class="mono" style="margin-top:10px; opacity:.75;">${data.note || ""}</div>
+        </div>
+      `;
+      document.getElementById("drawerBody").insertAdjacentHTML("beforeend", html);
+    } catch(e){
+      toast("Não consegui explicar o score (verifique o backend).");
+    } finally{
+      const exBtn = document.getElementById("dExplain");
+      if (exBtn){ exBtn.disabled = false; exBtn.style.opacity = "1"; exBtn.textContent = "🧠 Explicar score"; }
+    }
+  }
+
 
   function closeDrawer(){
     document.getElementById("drawerOverlay").style.display = "none";
@@ -976,6 +965,7 @@
   // Drawer
   document.getElementById("dConfirm").addEventListener("click", async () => { if (currentLead) await labelLead(currentLead.id, 1); });
   document.getElementById("dDeny").addEventListener("click", async () => { if (currentLead) await labelLead(currentLead.id, 0); });
+  document.getElementById("dExplain").addEventListener("click", async () => { if (currentLead) await explainLead(currentLead); });
   document.getElementById("btnClose").addEventListener("click", closeDrawer);
   document.getElementById("drawerOverlay").addEventListener("click", closeDrawer);
   window.addEventListener("keydown", (e)=>{ if(e.key === "Escape") closeDrawer(); });
@@ -1020,37 +1010,6 @@
 
   // Auto-load
   carregar();
-
-  document.addEventListener("DOMContentLoaded", () => {
-    ensureMonthlyReset();
-
-    const upClose = document.getElementById("upClose");
-    if (upClose) upClose.addEventListener("click", closeUpgradeModal);
-
-    const upModal = document.getElementById("upgradeModal");
-    if (upModal) upModal.addEventListener("click", (e)=>{ if (e.target === upModal) closeUpgradeModal(); });
-  });
-
 </script>
-
-  <!-- Upgrade Modal (auto abre quando estoura o limite do plano) -->
-  <div id="upgradeModal" style="position:fixed; inset:0; background:rgba(2,6,23,.85); display:none; align-items:center; justify-content:center; z-index:9999;">
-    <div style="background:#020617; border:1px solid rgba(148,163,184,.18); border-radius:16px; padding:24px; width:100%; max-width:420px;">
-      <h2 style="margin:0 0 8px 0;">🚀 Limite do plano atingido</h2>
-      <p style="margin:0 0 16px 0; opacity:.85;">
-        Você atingiu o limite mensal do seu plano. <br/>
-        Ative um plano para continuar qualificando leads.
-      </p>
-
-      <div style="display:grid; gap:12px;">
-        <a class="btn" id="upStarter" target="_blank" rel="noreferrer">Starter · R$79</a>
-        <a class="btn" id="upPro" target="_blank" rel="noreferrer">Pro · R$179</a>
-        <a class="btn" id="upVip" target="_blank" rel="noreferrer">VIP · R$279</a>
-      </div>
-
-      <button class="btn ghost" id="upClose" style="margin-top:12px; width:100%;">Depois</button>
-    </div>
-  </div>
-
 </body>
 </html>

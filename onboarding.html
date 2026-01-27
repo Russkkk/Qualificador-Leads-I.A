@@ -303,6 +303,19 @@
           </div>
         </div>
 
+      <div class="field">
+        <label for="plan">Escolha seu plano</label>
+        <div class="input">
+          <select id="plan" style="width:100%;border:none;outline:none;background:transparent;color:var(--text);font-size:14px;">
+            <option value="trial" selected>Trial (grátis • 100 leads)</option>
+            <option value="starter">Starter (R$79/mês • 1000 leads)</option>
+            <option value="pro">Pro (R$179/mês • 5000 leads)</option>
+            <option value="vip">VIP (R$279/mês • 20000 leads)</option>
+          </select>
+        </div>
+      </div>
+
+
         <div class="field">
           <label for="password">Senha</label>
           <div class="input">
@@ -326,7 +339,8 @@
       <div id="msg" class="msg"></div>
 
       <div id="postActions" class="actions" style="display:none;">
-        <button id="copyBtn" class="btnSecondary" type="button">Copiar client_id</button>
+        <button id="copyBtn" class="btnSecondary" type="button">Copiar workspace</button>
+        <button id="payBtn" class="btnSecondary" type="button" style="display:none;">Assinar com cartão</button>
         <button id="goDashBtn" class="btnSecondary" type="button">Ir para o dashboard</button>
       </div>
 
@@ -353,6 +367,9 @@
     const goDashBtn = document.getElementById("goDashBtn");
 
     let lastClientId = "";
+
+    // tenta habilitar checkout se já existir api_key no navegador
+    setTimeout(checkCheckoutEnabled, 200);
 
     showPass.addEventListener("change", () => {
       passwordInput.type = showPass.checked ? "text" : "password";
@@ -384,6 +401,7 @@
       e.preventDefault();
 
       const email = document.getElementById("email").value.trim();
+      const plan = (document.getElementById("plan")?.value || "trial").trim();
 
       if (!email) {
         setMessage("⚠️ Informe seu email para criar o workspace.", "error");
@@ -400,7 +418,7 @@
         const res = await fetch(`${API_BASE}/criar_cliente`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ client_id, plan: "trial" })
+          body: JSON.stringify({ client_id, plan })
         });
 
         const data = await res.json().catch(() => null);
@@ -419,11 +437,12 @@
                <code style="background:rgba(2,6,23,.35);padding:2px 6px;border-radius:8px;border:1px solid rgba(148,163,184,.18);">${lastClientId}</code>
              </div>
              <div style="margin-top:10px; opacity:.85; font-size:13px">
-               Plano <b>${data.plan || "trial"}</b> • Limite mensal: <b>${data.lead_limit_month ?? "—"}</b>
+               Plano <b>${data.plan || plan || "trial"}</b> • Limite mensal: <b>${data.lead_limit_month ?? "—"}</b>
              </div>`,
             "success"
           );
           postActions.style.display = "flex";
+          checkCheckoutEnabled();
         } else {
           const errMsg = (data && (data.error || data.reason)) ? (data.error || data.reason) : "Erro ao criar workspace.";
           setMessage(`❌ ${errMsg}`, "error");
@@ -445,6 +464,81 @@
         setMessage("Não consegui copiar automaticamente. Selecione e copie manualmente.", "error");
       }
     });
+
+    
+    const payBtn = document.getElementById("payBtn");
+
+    async function checkCheckoutEnabled(){
+      try{
+        const apiKey = (localStorage.getItem("api_key") || "").trim();
+        const clientId = (localStorage.getItem("client_id") || "").trim();
+        if (!apiKey || !clientId) return;
+
+        const res = await fetch(`${API_BASE}/billing_status?client_id=${encodeURIComponent(clientId)}`, {
+          headers: { "X-API-KEY": apiKey }
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.ok) return;
+
+        const enabled = !!data.checkout_enabled;
+        const currentPlan = ((data.client && data.client.plan) || "").toLowerCase();
+
+        // mostra botão apenas se checkout configurado e plano atual for trial/demo (ou usuário escolheu plano pago)
+        if (enabled){
+          payBtn.style.display = "inline-flex";
+        }
+      } catch {}
+    }
+
+    payBtn?.addEventListener("click", async () => {
+      try{
+        const apiKey = (localStorage.getItem("api_key") || "").trim();
+        const clientId = (localStorage.getItem("client_id") || "").trim();
+        const plan = (document.getElementById("plan")?.value || "starter").trim();
+
+        if (!apiKey || !clientId) {
+          setMessage("⚠️ Crie o workspace primeiro.", "error");
+          return;
+        }
+        if (plan === "trial" || plan === "demo") {
+          setMessage("⚠️ Selecione um plano pago (Starter/Pro/VIP) para assinar.", "error");
+          return;
+        }
+
+        payBtn.disabled = true;
+        payBtn.textContent = "Abrindo checkout...";
+
+        const res = await fetch(`${API_BASE}/billing/checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-API-KEY": apiKey },
+          body: JSON.stringify({
+            client_id: clientId,
+            plan,
+            success_url: "https://qualificador-leads-ia.onrender.com/?checkout=success",
+            cancel_url: "https://qualificador-leads-ia.onrender.com/?checkout=cancel"
+          })
+        });
+
+        const data = await res.json().catch(() => null);
+        if (res.ok && data && data.ok && data.checkout_url){
+          window.location.href = data.checkout_url;
+          return;
+        }
+
+        const fallback = data && (data.fallback || "");
+        if (fallback === "whatsapp"){
+          setMessage("ℹ️ Checkout ainda não está configurado no servidor. Use o WhatsApp para ativar.", "error");
+        } else {
+          setMessage("❌ Não consegui abrir o checkout. Tente novamente ou ative via WhatsApp.", "error");
+        }
+      } catch {
+        setMessage("❌ Falha ao abrir o checkout. Tente novamente.", "error");
+      } finally{
+        payBtn.disabled = false;
+        payBtn.textContent = "Assinar com cartão";
+      }
+    });
+
 
     goDashBtn.addEventListener("click", () => {
       // Se seu dashboard pede client_id, você já salvou no localStorage.

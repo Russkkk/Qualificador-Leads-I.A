@@ -201,6 +201,7 @@ def _ensure_schema():
                         nome TEXT,
                         email_lead TEXT,
                         telefone TEXT,
+                        origem TEXT,
                         tempo_site INTEGER,
                         paginas_visitadas INTEGER,
                         clicou_preco INTEGER,
@@ -222,6 +223,7 @@ def _ensure_schema():
                 cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS nome TEXT;")
                 cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_lead TEXT;")
                 cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS telefone TEXT;")
+                cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS origem TEXT;")
                 cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS tempo_site INTEGER;")
                 cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS paginas_visitadas INTEGER;")
                 cur.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS clicou_preco INTEGER;")
@@ -585,7 +587,12 @@ def health_db():
 @app.get("/pricing")
 def pricing():
     """Retorna o catálogo de planos (para UI)."""
-    return _json_ok({"plans": PLAN_CATALOG, "ts": _iso(_now_utc())})
+    return _json_ok({
+        "plans": PLAN_CATALOG,
+        "currency": "BRL",
+        "checkout_enabled": bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON),
+        "ts": _iso(_now_utc()),
+    })
 
 @app.post("/criar_cliente")
 def criar_cliente():
@@ -736,6 +743,8 @@ def prever():
     email = (data.get("email_lead") or data.get("email") or lead.get("email_lead") or lead.get("email") or "").strip()
     telefone = (data.get("telefone") or lead.get("telefone") or "").strip()
 
+    origem = (data.get("origem") or lead.get("origem") or lead.get("source") or "").strip()
+
     tempo_site = _safe_int(data.get("tempo_site") if "tempo_site" in data else lead.get("tempo_site"), 0)
     paginas_visitadas = _safe_int(data.get("paginas_visitadas") if "paginas_visitadas" in data else lead.get("paginas_visitadas"), 0)
     clicou_preco = _safe_int(data.get("clicou_preco") if "clicou_preco" in data else lead.get("clicou_preco"), 0)
@@ -761,6 +770,8 @@ def prever():
     payload.setdefault("email", email)
     payload.setdefault("email_lead", email)
     payload.setdefault("telefone", telefone)
+    if origem:
+        payload.setdefault("origem", origem)
     payload.setdefault("tempo_site", tempo_site)
     payload.setdefault("paginas_visitadas", paginas_visitadas)
     payload.setdefault("clicou_preco", clicou_preco)
@@ -772,13 +783,13 @@ def prever():
                 cur.execute(
                     """
                     INSERT INTO leads
-                      (client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
+                      (client_id, nome, email_lead, telefone, origem, tempo_site, paginas_visitadas, clicou_preco,
                        payload, probabilidade, score, label, virou_cliente, created_at, updated_at)
                     VALUES
-                      (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,NULL,NOW(),NOW())
+                      (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,NULL,NOW(),NOW())
                     RETURNING id, created_at
                     """,
-                    (client_id, nome, email, telefone, tempo_site, paginas_visitadas, clicou_preco,
+                    (client_id, nome, email, telefone, origem, tempo_site, paginas_visitadas, clicou_preco,
                      json.dumps(payload), float(prob), int(score), label),
                 )
                 row = cur.fetchone() or {}
@@ -1288,6 +1299,309 @@ def seed_demo():
 # =========================
 # Run local
 # =========================
+
+# =========================
+# Premium / Billing helpers
+# =========================
+def _stripe_price_id(plan: str) -> Optional[str]:
+    if not STRIPE_PRICE_IDS_JSON:
+        return None
+    try:
+        mp = json.loads(STRIPE_PRICE_IDS_JSON)
+        return (mp.get(plan) or "").strip() or None
+    except Exception:
+        return None
+
+def _admin_required() -> bool:
+    return _check_demo_key()
+
+def _upsert_subscription(client_id: str, plan: str, status: str, provider: str = "manual",
+                         period_start: Optional[datetime] = None, period_end: Optional[datetime] = None,
+                         cancel_at_period_end: bool = False):
+    if plan not in PLAN_CATALOG:
+        plan = "trial"
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    INSERT INTO subscriptions (client_id, provider, status, plan, current_period_start, current_period_end, cancel_at_period_end, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+                    ON CONFLICT (client_id) DO UPDATE SET
+                      provider=EXCLUDED.provider,
+                      status=EXCLUDED.status,
+                      plan=EXCLUDED.plan,
+                      current_period_start=EXCLUDED.current_period_start,
+                      current_period_end=EXCLUDED.current_period_end,
+                      cancel_at_period_end=EXCLUDED.cancel_at_period_end,
+                      updated_at=NOW()
+                """, (client_id, provider, status, plan, period_start, period_end, cancel_at_period_end))
+
+                # política de ativação: subscription active -> client ativo e plano pago
+                if status == "active":
+                    cur.execute("UPDATE clients SET plan=%s, status='active', updated_at=NOW() WHERE client_id=%s", (plan, client_id))
+                elif status in ("past_due", "canceled", "inactive"):
+                    # por padrão, desativa. Se quiser "grace period", ajuste aqui.
+                    cur.execute("UPDATE clients SET status='inactive', updated_at=NOW() WHERE client_id=%s", (client_id,))
+    finally:
+        conn.close()
+
+
+# =========================
+# Opção B: Operação / Cronless reset + Billing
+# =========================
+@app.post("/admin/reset_month")
+def admin_reset_month():
+    if not _admin_required():
+        return _json_err("Unauthorized (DEMO_KEY)", 403)
+
+    mk = _month_key()
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # reseta apenas workspaces que ainda estão no mês anterior
+                cur.execute("""
+                    UPDATE clients
+                    SET usage_month=%s, leads_used_month=0, updated_at=NOW()
+                    WHERE usage_month IS NULL OR usage_month<>%s
+                """, (mk, mk))
+                cur.execute("SELECT COUNT(*) AS n FROM clients")
+                n = int((cur.fetchone() or {}).get("n") or 0)
+        return _json_ok({"usage_month": mk, "clients_total": n})
+    finally:
+        conn.close()
+
+
+@app.get("/billing_status")
+def billing_status():
+    client_id = (request.args.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório", 400)
+
+    ok_auth, client_row, msg = _require_client_auth(client_id)
+    if not ok_auth:
+        return _json_err(msg, 403, code="auth_required")
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM subscriptions WHERE client_id=%s", (client_id,))
+                sub = cur.fetchone()
+        enabled = bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON)
+        return _json_ok({
+            "client_id": client_id,
+            "checkout_enabled": enabled,
+            "subscription": sub,
+            "client": {
+                "plan": client_row.get("plan"),
+                "status": client_row.get("status"),
+                "usage_month": client_row.get("usage_month"),
+                "leads_used_month": int(client_row.get("leads_used_month") or 0),
+            }
+        })
+    finally:
+        conn.close()
+
+
+@app.post("/billing/checkout")
+def billing_checkout():
+    """
+    Cria uma sessão de checkout (Stripe) se configurado.
+    Caso não configurado, retorna ok=false com fallback="whatsapp".
+    Requer X-API-KEY do workspace.
+    """
+    data = request.get_json(silent=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    plan = (data.get("plan") or "").strip().lower()
+    success_url = (data.get("success_url") or "").strip()
+    cancel_url = (data.get("cancel_url") or "").strip()
+
+    if not client_id:
+        return _json_err("client_id obrigatório", 400)
+    if plan not in PLAN_CATALOG or plan in ("trial", "demo"):
+        return _json_err("plan inválido para checkout", 400)
+
+    ok_auth, _, msg = _require_client_auth(client_id)
+    if not ok_auth:
+        return _json_err(msg, 403, code="auth_required")
+
+    if not (STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON):
+        return _json_err("Checkout ainda não configurado. Use WhatsApp para ativar.", 501, fallback="whatsapp")
+
+    price_id = _stripe_price_id(plan)
+    if not price_id:
+        return _json_err("Price ID do Stripe não encontrado para este plano.", 500)
+
+    # cria sessão via API REST (sem lib stripe)
+    import requests
+    url = "https://api.stripe.com/v1/checkout/sessions"
+    headers = {"Authorization": f"Bearer {STRIPE_SECRET_KEY}"}
+    payload = {
+        "mode": "subscription",
+        "line_items[0][price]": price_id,
+        "line_items[0][quantity]": "1",
+        "success_url": success_url or "https://qualificador-leads-ia.onrender.com/?checkout=success",
+        "cancel_url": cancel_url or "https://qualificador-leads-ia.onrender.com/?checkout=cancel",
+        "client_reference_id": client_id,
+        "metadata[client_id]": client_id,
+        "metadata[plan]": plan,
+    }
+    r = requests.post(url, headers=headers, data=payload, timeout=20)
+    if r.status_code >= 400:
+        return _json_err("Falha ao criar checkout no Stripe.", 502, stripe_status=r.status_code, stripe_body=r.text[:500])
+
+    j = r.json()
+    return _json_ok({"checkout_url": j.get("url"), "session_id": j.get("id"), "provider": "stripe"})
+
+
+@app.post("/billing/webhook")
+def billing_webhook():
+    """
+    Webhook genérico (Stripe/MercadoPago/etc.) com segredo simples.
+    Header esperado: X-BILLING-SECRET: <BILLING_WEBHOOK_SECRET>
+    """
+    if not BILLING_WEBHOOK_SECRET:
+        return _json_err("Webhook não configurado (BILLING_WEBHOOK_SECRET ausente).", 501)
+
+    got = _get_header("X-BILLING-SECRET")
+    if got != BILLING_WEBHOOK_SECRET:
+        return _json_err("Unauthorized", 403)
+
+    payload = request.get_json(silent=True) or {}
+    provider = (payload.get("provider") or "manual").strip().lower()
+    event_type = (payload.get("type") or payload.get("event_type") or "unknown").strip()
+    client_id = (payload.get("client_id") or (payload.get("data") or {}).get("client_id") or "").strip()
+
+    # log do evento
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    INSERT INTO billing_events (provider, event_type, client_id, payload)
+                    VALUES (%s,%s,%s,%s::jsonb)
+                """, (provider, event_type, client_id or None, json.dumps(payload)))
+    finally:
+        conn.close()
+
+    # política simples (você pode expandir conforme provider real)
+    plan = (payload.get("plan") or "").strip().lower()
+    status = (payload.get("status") or "").strip().lower()
+
+    if client_id and plan and status:
+        try:
+            _upsert_subscription(client_id, plan=plan, status=status, provider=provider)
+        except Exception as e:
+            return _json_err("Evento recebido, mas falhou ao aplicar.", 500, detail=repr(e))
+
+    return _json_ok({"received": True})
+
+
+# =========================
+# Opção C: Recursos Premium (métricas + explicação)
+# =========================
+@app.get("/funnels")
+def funnels():
+    client_id = (request.args.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório", 400)
+
+    ok_auth, _, msg = _require_client_auth(client_id)
+    if not ok_auth:
+        return _json_err(msg, 403, code="auth_required")
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT
+                      COUNT(*) AS total,
+                      SUM(CASE WHEN probabilidade >= 0.70 THEN 1 ELSE 0 END) AS hot,
+                      SUM(CASE WHEN probabilidade >= 0.35 AND probabilidade < 0.70 THEN 1 ELSE 0 END) AS warm,
+                      SUM(CASE WHEN probabilidade < 0.35 THEN 1 ELSE 0 END) AS cold,
+                      SUM(CASE WHEN virou_cliente = 1 THEN 1 ELSE 0 END) AS convertidos,
+                      SUM(CASE WHEN virou_cliente = 0 THEN 1 ELSE 0 END) AS negados,
+                      SUM(CASE WHEN virou_cliente IS NULL THEN 1 ELSE 0 END) AS pendentes
+                    FROM leads WHERE client_id=%s
+                """, (client_id,))
+                row = cur.fetchone() or {}
+
+        total = int(row.get("total") or 0)
+        conv = int(row.get("convertidos") or 0)
+        labeled = int(row.get("convertidos") or 0) + int(row.get("negados") or 0)
+        conv_rate = (conv / labeled) if labeled else 0.0
+        return _json_ok({
+            "client_id": client_id,
+            "total": total,
+            "hot": int(row.get("hot") or 0),
+            "warm": int(row.get("warm") or 0),
+            "cold": int(row.get("cold") or 0),
+            "convertidos": conv,
+            "negados": int(row.get("negados") or 0),
+            "pendentes": int(row.get("pendentes") or 0),
+            "conversion_rate_labeled": conv_rate,
+        })
+    finally:
+        conn.close()
+
+
+@app.get("/lead_explain")
+def lead_explain():
+    client_id = (request.args.get("client_id") or "").strip()
+    lead_id = _safe_int(request.args.get("lead_id"), 0)
+    if not client_id or not lead_id:
+        return _json_err("client_id e lead_id obrigatórios", 400)
+
+    ok_auth, _, msg = _require_client_auth(client_id)
+    if not ok_auth:
+        return _json_err(msg, 403, code="auth_required")
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM leads WHERE client_id=%s AND id=%s", (client_id, lead_id))
+                lead = cur.fetchone()
+        if not lead:
+            return _json_err("Lead não encontrado", 404)
+
+        tempo = _safe_int(lead.get("tempo_site"), 0)
+        pags = _safe_int(lead.get("paginas_visitadas"), 0)
+        clicou = _safe_int(lead.get("clicou_preco"), 0)
+
+        parts = []
+        base = 0.10
+        parts.append({"factor": "base", "delta": base, "why": "ponto de partida do modelo"} )
+
+        d_tempo = min(tempo / 400, 0.25)
+        parts.append({"factor": "tempo_site", "delta": d_tempo, "why": f"{tempo}s no site"})
+
+        d_pags = min(pags / 10, 0.25)
+        parts.append({"factor": "paginas_visitadas", "delta": d_pags, "why": f"{pags} páginas visitadas"})
+
+        d_click = 0.20 if clicou else 0.0
+        parts.append({"factor": "clicou_preco", "delta": d_click, "why": "clicou em preço" if clicou else "não clicou em preço"})
+
+        tel = (lead.get("telefone") or "").strip()
+        nome = (lead.get("nome") or "").strip()
+        d_tel = 0.06 if (tel and len(tel) >= 10) else 0.0
+        d_nome = 0.04 if (nome and len(nome) >= 4) else 0.0
+        if d_tel: parts.append({"factor": "telefone", "delta": d_tel, "why": "telefone válido"})
+        if d_nome: parts.append({"factor": "nome", "delta": d_nome, "why": "nome preenchido"})
+
+        score = float(lead.get("probabilidade") or 0.0)
+        return _json_ok({
+            "client_id": client_id,
+            "lead_id": lead_id,
+            "probabilidade": score,
+            "explain": parts,
+            "note": "Explicação do score heurístico (antes do treino)."
+        })
+    finally:
+        conn.close()
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
