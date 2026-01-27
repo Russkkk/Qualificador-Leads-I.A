@@ -1,2 +1,270 @@
-<!-- index.html atualizado com DEMO_KEY dinâmica -->
-<!-- (conteúdo omitido por brevidade, versão correta aplicada) -->
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeadRank — Dashboard</title>
+  
+<style>
+  :root { color-scheme: light; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; background: #0b0f17; color: #e8eefc; }
+  .container { max-width: 1040px; margin: 0 auto; padding: 28px 18px; }
+  .card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .grow { flex: 1 1 360px; }
+  h1 { font-size: 34px; margin: 6px 0 10px; }
+  h2 { font-size: 18px; margin: 0 0 12px; opacity: 0.95; }
+  p { opacity: 0.88; line-height: 1.45; }
+  .btn { appearance: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 10px 14px; cursor: pointer; color: #e8eefc; background: rgba(255,255,255,0.06); }
+  .btn:hover { background: rgba(255,255,255,0.10); }
+  .btn-primary { background: rgba(99, 102, 241, 0.40); border-color: rgba(99, 102, 241, 0.65); }
+  .btn-primary:hover { background: rgba(99, 102, 241, 0.55); }
+  .btn-ghost { background: transparent; }
+  .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); font-size: 12px; opacity: 0.95; }
+  .muted { opacity: 0.75; }
+  .input, textarea { width: 100%; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 10px 12px; color: #e8eefc; outline: none; }
+  textarea { min-height: 110px; resize: vertical; }
+  code { background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.10); }
+  .topbar { display:flex; justify-content: space-between; align-items:center; gap: 12px; margin-bottom: 16px; }
+  .modal.hidden { display: none; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.60); display: flex; align-items: center; justify-content: center; padding: 18px; z-index: 50; }
+  .modal-card { width: min(520px, 100%); background: #0f172a; border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 18px; box-shadow: 0 18px 60px rgba(0,0,0,0.45); }
+  .modal-header { display:flex; justify-content: space-between; align-items:flex-start; gap: 12px; margin-bottom: 12px; }
+  .modal-title { font-size: 18px; font-weight: 700; }
+  .modal-subtitle { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+  .label { font-size: 13px; opacity: 0.85; display:block; margin: 10px 0 6px; }
+  .modal-actions { display:flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+  .modal-footnote { margin-top: 10px; font-size: 12px; opacity: 0.75; }
+  .kpi { font-size: 28px; font-weight: 800; margin-top: 8px; }
+  .grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .error { color: #fecaca; background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.30); padding: 10px 12px; border-radius: 12px; }
+  .ok { color: #bbf7d0; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.28); padding: 10px 12px; border-radius: 12px; }
+</style>
+
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="pill"><a href="./landing.html" style="color:inherit; text-decoration:none;">LeadRank</a> • <span class="muted">Dashboard</span></div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button id="changeKeyBtn" class="btn btn-ghost" type="button">DEMO_KEY</button>
+        <a class="btn" href="./onboarding.html">Teste rápido</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Leads (período)</h2>
+        <div class="kpi" id="kpiLeads">—</div>
+        <p class="muted">Total de leads no período selecionado.</p>
+      </div>
+      <div class="card">
+        <h2>A/B/C</h2>
+        <div class="kpi" id="kpiABC">—</div>
+        <p class="muted">Distribuição por classe.</p>
+      </div>
+      <div class="card">
+        <h2>Top origens</h2>
+        <div class="kpi" id="kpiOrigem">—</div>
+        <p class="muted">Origem com maior volume.</p>
+      </div>
+    </div>
+
+    <div style="height:14px"></div>
+
+    <div class="card">
+      <div class="row" style="align-items:center; justify-content:space-between;">
+        <h2 style="margin:0;">Dados do dashboard</h2>
+        <button class="btn btn-primary" id="refreshBtn" type="button">Atualizar</button>
+      </div>
+      <div style="height:12px"></div>
+      <div id="dashError"></div>
+      <pre id="dashRaw" class="card" style="white-space:pre-wrap; overflow:auto;"></pre>
+    </div>
+  </div>
+
+  
+<!-- DEMO KEY MODAL -->
+<div id="keyModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <div id="keyModalTitle" class="modal-title">Configurar DEMO_KEY</div>
+        <div id="keyModalHint" class="modal-subtitle">Cole sua DEMO_KEY para autorizar as chamadas à API.</div>
+      </div>
+    </div>
+
+    <label class="label" for="demoKeyInput">DEMO_KEY</label>
+    <input id="demoKeyInput" class="input" type="password" autocomplete="off" spellcheck="false" />
+
+    <div class="modal-actions">
+      <button id="cancelKeyBtn" class="btn btn-ghost" type="button">Cancelar</button>
+      <button id="saveKeyBtn" class="btn btn-primary" type="button">Salvar</button>
+    </div>
+    <div class="modal-footnote">
+      Dica: você também pode abrir com <code>?demo_key=...</code> na URL para configurar automaticamente.
+    </div>
+  </div>
+</div>
+
+  
+<script>
+  const BACKEND = (window.BACKEND_URL || "https://qualificador-leads-i-a.onrender.com").replace(/\/$/, "");
+  const DEFAULT_DEMO_KEY = 'Leadrank#2026!x9';
+
+  function qs(key){
+    try {
+      return new URLSearchParams(location.search).get(key);
+    } catch(e) { return null; }
+  }
+
+  function setStoredDemoKey(v){
+    if (!v) return;
+    localStorage.setItem("DEMO_KEY", String(v).trim());
+  }
+
+  function getStoredDemoKey(){
+    const v = localStorage.getItem("DEMO_KEY");
+    return (v && v.trim()) ? v.trim() : null;
+  }
+
+  function getDemoKey(){
+    // 1) query param wins
+    const qk = qs("demo_key");
+    if (qk && qk.trim()) {
+      setStoredDemoKey(qk);
+      return qk.trim();
+    }
+    // 2) localStorage
+    const sk = getStoredDemoKey();
+    if (sk) return sk;
+    // 3) default (for your internal demo)
+    setStoredDemoKey(DEFAULT_DEMO_KEY);
+    return DEFAULT_DEMO_KEY;
+  }
+
+  function openKeyModal(force=false){
+    const modal = document.getElementById("keyModal");
+    const input = document.getElementById("demoKeyInput");
+    const current = getStoredDemoKey() || DEFAULT_DEMO_KEY || "";
+    input.value = current;
+    modal.classList.remove("hidden");
+    if (force) {
+      const hint = document.getElementById("keyModalHint");
+      if (hint) hint.textContent = "Sua DEMO_KEY mudou/expirou. Digite a nova e salve.";
+    }
+    input.focus();
+    input.select();
+  }
+
+  function closeKeyModal() {
+    document.getElementById("keyModal").classList.add("hidden");
+  }
+
+  function saveKeyFromModal(){
+    const v = (document.getElementById("demoKeyInput").value || "").trim();
+    if (!v) {
+      alert("Informe uma DEMO_KEY válida.");
+      return;
+    }
+    setStoredDemoKey(v);
+    closeKeyModal();
+    // refresh without query param to keep URL clean
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete("demo_key");
+      history.replaceState(null, "", u.toString());
+    } catch(e) {}
+  }
+
+  async function api(path, opts={}) {
+    const url = BACKEND + path;
+    const demoKey = getDemoKey();
+    const headers = {
+      "Content-Type": "application/json",
+      ...(demoKey ? { "x-demo-key": demoKey } : {}),
+      ...(opts.headers || {})
+    };
+    const res = await fetch(url, { ...opts, headers });
+
+    let data = null;
+    try { data = await res.json(); } catch(e) { /* ignore */ }
+
+    if (!res.ok) {
+      const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
+
+      // If DEMO_KEY unauthorized, prompt to re-enter
+      if (res.status === 401 && String(msg).toLowerCase().includes("demo_key")) {
+        localStorage.removeItem("DEMO_KEY");
+        openKeyModal(true);
+      }
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // Expose helpers
+  window.__leadrank = {
+    api, openKeyModal, saveKeyFromModal, closeKeyModal, getDemoKey
+  };
+
+  // On load: if no stored key and no query param, default is set; still allow change
+  window.addEventListener("DOMContentLoaded", () => {
+    // if user explicitly removed key, allow modal via button
+    const btn = document.getElementById("changeKeyBtn");
+    if (btn) btn.addEventListener("click", () => openKeyModal(false));
+
+    const saveBtn = document.getElementById("saveKeyBtn");
+    if (saveBtn) saveBtn.addEventListener("click", saveKeyFromModal);
+
+    const cancelBtn = document.getElementById("cancelKeyBtn");
+    if (cancelBtn) cancelBtn.addEventListener("click", closeKeyModal);
+
+    // Esc closes modal
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeKeyModal();
+    });
+  });
+</script>
+
+
+  <script>
+    function safeStr(x){ return (x === null || x === undefined) ? "" : String(x); }
+    function pickTop(origins){
+      if (!origins || typeof origins !== "object") return "—";
+      let top = null;
+      for (const [k,v] of Object.entries(origins)) {
+        if (top === null || (Number(v)||0) > (Number(top[1])||0)) top = [k, v];
+      }
+      return top ? top[0] : "—";
+    }
+
+    async function loadDashboard(){
+      const err = document.getElementById("dashError");
+      const raw = document.getElementById("dashRaw");
+      err.innerHTML = "";
+      raw.textContent = "";
+      try {
+        const data = await window.__leadrank.api("/dashboard_data", { method: "GET" });
+        raw.textContent = JSON.stringify(data, null, 2);
+
+        // Tenta preencher KPIs com alguns nomes comuns; se sua API tiver nomes diferentes, ainda mostra o JSON completo.
+        document.getElementById("kpiLeads").textContent = safeStr(data.total_leads || data.total || data.leads_total || "—");
+        const a = (data.abc && (data.abc.A ?? data.abc.a)) ?? data.A ?? "—";
+        const b = (data.abc && (data.abc.B ?? data.abc.b)) ?? data.B ?? "—";
+        const c = (data.abc && (data.abc.C ?? data.abc.c)) ?? data.C ?? "—";
+        document.getElementById("kpiABC").textContent = `${a} / ${b} / ${c}`;
+        document.getElementById("kpiOrigem").textContent = pickTop(data.origens || data.origins || data.by_origem);
+      } catch(e) {
+        err.innerHTML = '<div class="error"><b>Erro:</b> ' + String(e.message || e) + '</div>';
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("refreshBtn").addEventListener("click", loadDashboard);
+      loadDashboard();
+    });
+  </script>
+</body>
+</html>
