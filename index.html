@@ -205,6 +205,8 @@
       .input, .select{ width: 100%; }
       .topbar{ top: 10px; }
     }
+  
+    .planbar{ display:flex; gap:10px; align-items:center; }
   </style>
 </head>
 <body>
@@ -218,7 +220,13 @@
           <div class="tabs">
             <button class="tab active" id="tabDash">📊 Dashboard</button>
             <button class="tab" id="tabInsights">📈 Insights</button>
-          </div>
+          
+
+      <div class="planbar">
+        <span class="pill" id="pillPlan">plano: —</span>
+        <a class="btn small" id="btnUpgrade" href="https://wa.me/5511999999999?text=Quero%20ativar%20meu%20plano%20do%20LeadRank" target="_blank" rel="noreferrer">⚡ Ativar plano</a>
+      </div>
+</div>
         </div>
       </div>
 
@@ -414,6 +422,7 @@
   const WS_KEY = "leadrank_workspaces";
   const WS_LAST = "leadrank_last_workspace";
   const DEMO_KEY_STORE = "leadrank_demo_key"; // sessionStorage
+  const API_KEYS = "leadrank_api_keys"; // localStorage JSON {client_id: api_key}
 
   let chartDash = null;
   let chartInsBar = null;
@@ -491,8 +500,36 @@
     else sel.value = list[0];
   }
 
-  async function api(path, opts={}){
+  
+  async function refreshPlan(){
+    const clientId = getWorkspace();
+    const pill = document.getElementById("pillPlan");
+    if (!pill) return;
+    if (!clientId){ pill.textContent = "plano: —"; return; }
+
+    try{
+      const meta = await api(`/client_meta?client_id=${encodeURIComponent(clientId)}`);
+      pill.textContent = `plano: ${meta.plan || "—"}`;
+    }catch(e){
+      pill.textContent = "plano: —";
+    }
+  }
+
+async function api(path, opts={}){
     const url = BACKEND + path;
+
+    // custom option: authClientId (injeta X-API-KEY quando necessário)
+    const authClientId = opts.authClientId;
+    if (authClientId){
+      try{
+        const m = JSON.parse(localStorage.getItem(API_KEYS) || "{}");
+        const k = m[authClientId];
+        if (k){
+          opts.headers = Object.assign({}, (opts.headers||{}), {"X-API-KEY": k});
+        }
+      }catch(e){}
+    }
+
     const res = await fetch(url, opts);
     let data = null;
     try{ data = await res.json(); } catch(e){}
@@ -742,6 +779,7 @@
       renderChartDash(leads);
 
       document.getElementById("subTitle").textContent = `Workspace: ${clientId} • ${leads.length} leads (ordenados por score).`;
+      refreshPlan();
       toast("Dados carregados ✅");
     }catch(err){
       document.getElementById("subTitle").textContent = "Erro ao carregar.";
@@ -757,7 +795,8 @@
       await api(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({client_id: clientId, lead_id: leadId})
+        body: JSON.stringify({client_id: clientId, lead_id: leadId}),
+          authClientId: clientId
       });
       await carregar();
       toast(label === 1 ? "Marcado como convertido ✅" : "Marcado como negado ❌");
@@ -771,7 +810,7 @@
     const clientId = getWorkspace();
     if (!clientId) return toast("Selecione um workspace.");
     try{
-      const res = await api(`/recalc_pending?client_id=${encodeURIComponent(clientId)}&limit=500`);
+      const res = await api(`/recalc_pending?client_id=${encodeURIComponent(clientId)}&limit=500`, {authClientId: clientId});
       toast(`Recalculado: ${res.updated || 0} leads ✅`);
       await carregar();
     }catch(err){
@@ -786,7 +825,8 @@
       const res = await api(`/auto_threshold`, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({client_id: clientId})
+        body: JSON.stringify({client_id: clientId}),
+         authClientId: clientId
       });
       savedThreshold = res.threshold;
       document.getElementById("pillThreshold").textContent = `threshold: ${Number(savedThreshold).toFixed(2)}`;
@@ -872,23 +912,57 @@
     const clientId = getWorkspace();
     if (!clientId) return toast("Selecione um workspace.");
 
+    // 1) Se você tiver DEMO_KEY (modo interno), usa o seed_demo protegido (mantém segurança)
     let key = sessionStorage.getItem(DEMO_KEY_STORE) || "";
-    if (!key){
-      key = prompt("Cole sua DEMO_KEY (Render → Backend → Environment):");
-      if (!key) return;
-      sessionStorage.setItem(DEMO_KEY_STORE, key);
+    if (key){
+      try{
+        const res = await api(`/seed_demo`, {
+          method: "POST",
+          headers: {"Content-Type":"application/json", "X-DEMO-KEY": key},
+          body: JSON.stringify({client_id: clientId, n: 30})
+        });
+        toast(`Demo gerada ✅ (${res.inserted} leads)`);
+        await carregar();
+        return;
+      }catch(err){
+        toast("Erro: " + err.message + " (Se mudou a key, recarregue a página e tente de novo.)");
+        return;
+      }
     }
 
+    // 2) Se NÃO tiver DEMO_KEY, usa demo_public (sem pedir nada) — CONTROLADA no backend
     try{
-      const res = await api(`/seed_demo`, {
+      const res = await api(`/demo_public`, {
         method: "POST",
-        headers: {"Content-Type":"application/json", "X-DEMO-KEY": key},
-        body: JSON.stringify({client_id: clientId, n: 30})
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({n: 30})
       });
-      toast(`Demo gerada ✅ (${res.inserted} leads)`);
+
+      // salva workspace + api_key retornada
+      const demoWs = res.client_id;
+      const apiKey = res.api_key;
+
+      const list = loadWorkspaces();
+      if (!list.includes(demoWs)) list.push(demoWs);
+      saveWorkspaces(list);
+      localStorage.setItem(WS_LAST, demoWs);
+
+      if (apiKey){
+        try{
+          const m = JSON.parse(localStorage.getItem(API_KEYS) || "{}");
+          m[demoWs] = apiKey;
+          localStorage.setItem(API_KEYS, JSON.stringify(m));
+        }catch(e){
+          localStorage.setItem(API_KEYS, JSON.stringify({[demoWs]: apiKey}));
+        }
+      }
+
+      renderWorkspaces();
+      document.getElementById("workspace").value = demoWs;
+      toast(`Demo pronta ✅ (${res.inserted} leads)`);
       await carregar();
     }catch(err){
-      toast("Erro: " + err.message + " (Se mudou a key, recarregue a página e tente de novo.)");
+      toast("Erro: " + err.message);
     }
   }
 
@@ -942,6 +1016,7 @@
     renderWorkspaces();
     document.getElementById("workspace").value = w;
     localStorage.setItem(WS_LAST, w);
+    refreshPlan();
     toast("Workspace criado ✅");
   });
 
@@ -966,6 +1041,7 @@
 
   // Init
   renderWorkspaces();
+  refreshPlan();
   document.getElementById("backendLabel").textContent = BACKEND;
 
   // Auto-load

@@ -6,6 +6,7 @@ import re
 import math
 import random
 import string
+import secrets
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -94,16 +95,26 @@ def _require_demo_key():
       - Header: X-DEMO-KEY
       - Query: demo_key
       - JSON: demo_key
+    Always reads DEMO_KEY fresh from env (Render-safe).
     """
-    if not DEMO_KEY:
+    expected = (os.getenv("DEMO_KEY") or "").strip()
+    if not expected:
         return False, "DEMO_KEY não configurada no servidor."
+
     key = (request.headers.get("X-DEMO-KEY") or "").strip()
+
     if not key:
         key = (request.args.get("demo_key") or "").strip()
+
     if not key:
         data = request.get_json(silent=True) or {}
         key = (data.get("demo_key") or "").strip()
-    if key != DEMO_KEY:
+
+    # (extra tolerância: alguns clients mandam "Bearer <key>")
+    if key.lower().startswith("bearer "):
+        key = key[7:].strip()
+
+    if key != expected:
         return False, "Chave DEMO_KEY inválida."
     return True, ""
 
@@ -114,6 +125,17 @@ def _ensure_schema():
     """
     with db_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                client_id TEXT PRIMARY KEY,
+                plan TEXT NOT NULL DEFAULT 'trial',
+                api_key TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """)
+            cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key);""")
+
             cur.execute("""
             CREATE TABLE IF NOT EXISTS leads (
                 id SERIAL PRIMARY KEY,
@@ -356,25 +378,27 @@ def metrics():
 @app.post("/criar_cliente")
 def criar_cliente():
     """
-    Mantido por compatibilidade com seu front antigo.
-    Aqui pode só validar/retornar ok (workspace é client_id).
+    Cria (ou garante) um workspace (client_id) e retorna api_key + plano.
+    - Self-service: plan=trial (default)
+    - SaaS mensal: plan=starter/pro
+    - Setup: você pode criar com plan=pro
     """
     data = request.get_json(force=True) or {}
     client_id = (data.get("client_id") or "").strip()
+    plan = (data.get("plan") or "trial").strip().lower()
+
     if not client_id:
         return _json_err("client_id obrigatório")
 
-    # cria meta se não existir
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO model_meta (client_id, can_train, labeled_count, classes_rotuladas, updated_at)
-                VALUES (%s, FALSE, 0, '[]', NOW())
-                ON CONFLICT (client_id) DO NOTHING
-            """, (client_id,))
-        conn.commit()
+    row = _ensure_client(client_id, plan=plan, status="active")
 
-    return _json_ok({"client_id": client_id})
+    # mantém compatibilidade: também garante model_meta (feito em _ensure_client)
+    return _json_ok({
+        "client_id": row.get("client_id", client_id),
+        "plan": row.get("plan", plan),
+        "api_key": row.get("api_key")
+    })
+
 
 @app.post("/prever")
 def prever():
@@ -386,6 +410,10 @@ def prever():
     client_id = (data.get("client_id") or "").strip()
     if not client_id:
         return _json_err("client_id obrigatório")
+
+    ok, msg = _require_api_key(client_id)
+    if not ok:
+        return _json_err(msg, 403)
 
     nome = (data.get("nome") or "").strip()
     email = (data.get("email_lead") or data.get("email") or "").strip()
@@ -421,6 +449,23 @@ def prever():
         "probabilidade": float(prob),
         "created_at": _iso(row["created_at"])
     })
+
+
+@app.get("/client_meta")
+def client_meta():
+    """Metadados públicos do workspace (para UI)."""
+    client_id = (request.args.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório")
+    row = _client_row(client_id)
+    if not row:
+        return _json_err("workspace não encontrado", 404)
+    return _json_ok({
+        "client_id": row.get("client_id"),
+        "plan": row.get("plan"),
+        "status": row.get("status")
+    })
+
 
 @app.get("/dashboard_data")
 def dashboard_data():
@@ -509,6 +554,10 @@ def recalc_pending():
     if not client_id:
         return _json_err("client_id obrigatório")
 
+    ok, msg = _require_api_key(client_id)
+    if not ok:
+        return _json_err(msg, 403)
+
     labeled = _get_labeled_rows(client_id)
     can, reason, classes = _can_train(labeled)
     if not can:
@@ -562,6 +611,18 @@ def auto_threshold():
     client_id = (data.get("client_id") or "").strip()
     if not client_id:
         return _json_err("client_id obrigatório")
+
+    ok, msg = _require_api_key(client_id)
+    if not ok:
+        return _json_err(msg, 403)
+
+    ok, msg = _require_api_key(client_id)
+    if not ok:
+        return _json_err(msg, 403)
+
+    ok, msg = _require_api_key(client_id)
+    if not ok:
+        return _json_err(msg, 403)
 
     labeled = _get_labeled_rows(client_id)
     can, reason, classes = _can_train(labeled)
@@ -762,6 +823,38 @@ def seed_demo():
         "denied": neg,
         "pending": inserted - conv - neg
     }), 200
+
+
+
+@app.post("/demo_public")
+def demo_public():
+    """
+    Demo pública CONTROLADA (sem DEMO_KEY):
+    - Cria workspace demo_<xxxx>
+    - Rate limit por IP
+    - Gera poucos leads (n <= 40)
+    Retorna client_id + api_key (para permitir ações no dashboard).
+    """
+    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
+    if not _demo_public_allow(ip):
+        return _json_err("Muitas demos criadas. Tente novamente mais tarde.", 429)
+
+    data = request.get_json(silent=True) or {}
+    n = int(data.get("n") or 30)
+    n = max(10, min(n, 40))
+
+    suffix = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(4))
+    client_id = f"demo_{suffix}"
+
+    row = _ensure_client(client_id, plan="demo", status="demo")
+    stats = _seed_demo_data(client_id, n=n)
+
+    return _json_ok({
+        "client_id": client_id,
+        "plan": "demo",
+        "api_key": row.get("api_key"),
+        **stats
+    }, 200)
 
 
 # =========================
