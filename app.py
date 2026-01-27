@@ -186,15 +186,6 @@ def _safe_float(x: Any, default: Optional[float] = None) -> Optional[float]:
     except Exception:
         return default
 
-
-def _norm_text(x: Any) -> str:
-    return (str(x).strip() if x is not None else "")
-
-def _norm_origem(x: Any) -> str:
-    """Normaliza origem para evitar NULL/vazio e categorias duplicadas."""
-    s = _norm_text(x).lower()
-    return s if s else "desconhecida"
-
 def _require_env_db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL não configurada (Render Environment)")
@@ -817,7 +808,9 @@ def prever():
     email = (data.get("email_lead") or data.get("email") or lead.get("email_lead") or lead.get("email") or "").strip()
     telefone = (data.get("telefone") or lead.get("telefone") or "").strip()
 
-    origem = _norm_origem(data.get("origem") or lead.get("origem") or lead.get("source") or "")
+    origem = (data.get("origem") or lead.get("origem") or lead.get("source") or "").strip().lower()
+    if not origem:
+        origem = "desconhecida"
 
     tempo_site = _safe_int(data.get("tempo_site") if "tempo_site" in data else lead.get("tempo_site"), 0)
     paginas_visitadas = _safe_int(data.get("paginas_visitadas") if "paginas_visitadas" in data else lead.get("paginas_visitadas"), 0)
