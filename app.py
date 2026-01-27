@@ -6,8 +6,8 @@ import re
 import math
 import random
 import string
-import secrets
 import json
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -28,57 +28,6 @@ from sklearn.pipeline import Pipeline
 # =========================
 app = Flask(__name__)
 
-
-# -----------------------------
-# Planos comerciais (BRL)
-# -----------------------------
-PLAN_CATALOG = {
-    # trial: usado no onboarding self-service (ex.: 7 dias/100 leads). Preço pode ser 0.
-    "trial":   {"price_brl_month": 0,   "lead_limit_month": 100,   "label": "Trial"},
-    "starter": {"price_brl_month": 79,  "lead_limit_month": 1000,  "label": "Starter"},
-    "pro":     {"price_brl_month": 179, "lead_limit_month": 5000,  "label": "Pro"},
-    "vip":     {"price_brl_month": 279, "lead_limit_month": 20000, "label": "VIP"},
-    "demo":    {"price_brl_month": 0,   "lead_limit_month": 30,    "label": "Demo"},
-}
-
-def _month_start_utc(dt: datetime) -> datetime:
-    dt = dt.astimezone(timezone.utc)
-    return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-def _lead_limit_for_plan(plan: str) -> Optional[int]:
-    return (PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"]).get("lead_limit_month"))  # type: ignore
-
-def _price_for_plan(plan: str) -> int:
-    return int(PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"]).get("price_brl_month", 0))
-
-def _count_leads_this_month(client_id: str) -> int:
-    start = _month_start_utc(_now_utc())
-    with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM leads WHERE client_id=%s AND created_at >= %s", (client_id, start))
-            return int(cur.fetchone()[0] or 0)
-
-def _enforce_monthly_lead_limit_or_error(client_id: str) -> Optional[Response]:
-    row = _client_row(client_id)
-    if not row:
-        return _json_err("workspace não encontrado", 404)
-    plan = (row.get("plan") or "trial").strip().lower()
-    limit = _lead_limit_for_plan(plan)
-    # None => ilimitado (não usamos agora, mas mantém compatível)
-    if limit is None:
-        return None
-    used = _count_leads_this_month(client_id)
-    if used >= int(limit):
-        return jsonify({
-            "ok": False,
-            "error": "Limite mensal do plano atingido. Faça upgrade para continuar.",
-            "code": "plan_limit",
-            "plan": plan,
-            "used_this_month": used,
-            "limit_month": int(limit),
-            "price_brl_month": _price_for_plan(plan),
-        }), 402
-    return None
 # ✅ CORS: libera o seu Static Site (Render) e também localhost para testes
 CORS(app, resources={r"/*": {"origins": [
     "https://qualificador-leads-ia.onrender.com",
@@ -169,6 +118,67 @@ def _require_demo_key():
         return False, "Chave DEMO_KEY inválida."
     return True, ""
 
+
+# =========================
+# Monetização: planos / api_key / uso mensal
+# =========================
+PLAN_CATALOG = {
+    "demo":    {"price_brl_month": 0,   "lead_limit_month": 30},
+    "trial":   {"price_brl_month": 0,   "lead_limit_month": 100},
+    "starter": {"price_brl_month": 79,  "lead_limit_month": 1000},
+    "pro":     {"price_brl_month": 179, "lead_limit_month": 5000},
+    "vip":     {"price_brl_month": 279, "lead_limit_month": 20000},
+}
+
+def _month_key(dt: Optional[datetime] = None) -> str:
+    dt = dt or _now_utc()
+    return dt.strftime("%Y-%m")
+
+def _gen_api_key() -> str:
+    return "sk_live_" + secrets.token_urlsafe(24)
+
+def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
+    """Garante que existe um registro em clients. Reseta uso mensal ao virar o mês."""
+    plan = (plan or "trial").strip().lower()
+    if plan not in PLAN_CATALOG:
+        plan = "trial"
+
+    mk = _month_key()
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO clients (client_id, api_key, plan, status, usage_month, leads_used_month, updated_at)
+                VALUES (%s, NULL, %s, 'active', %s, 0, NOW())
+                ON CONFLICT (client_id) DO NOTHING
+            """, (client_id, plan, mk))
+
+            cur.execute("""SELECT * FROM clients WHERE client_id=%s FOR UPDATE""", (client_id,))
+            row = cur.fetchone() or {}
+            usage_month = (row.get("usage_month") or "").strip()
+            if usage_month != mk:
+                cur.execute("""UPDATE clients SET usage_month=%s, leads_used_month=0, updated_at=NOW() WHERE client_id=%s""", (mk, client_id))
+                cur.execute("""SELECT * FROM clients WHERE client_id=%s""", (client_id,))
+                row = cur.fetchone() or {}
+
+        conn.commit()
+
+    return row
+
+def _require_api_key(client_row: Dict[str, Any]) -> Tuple[bool, str]:
+    """Se o cliente tem api_key cadastrada, exige X-API-KEY correta."""
+    expected = (client_row.get("api_key") or "").strip()
+    if not expected:
+        return True, ""  # compatibilidade: workspace antigo sem key
+
+    got = (request.headers.get("X-API-KEY") or "").strip()
+    if not got:
+        data = request.get_json(silent=True) or {}
+        got = (data.get("api_key") or "").strip()
+
+    if got != expected:
+        return False, "api_key inválida ou ausente."
+    return True, ""
 def _ensure_schema():
     """
     Cria tabelas mínimas necessárias para Postgres.
@@ -176,17 +186,6 @@ def _ensure_schema():
     """
     with db_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS clients (
-                client_id TEXT PRIMARY KEY,
-                plan TEXT NOT NULL DEFAULT 'trial',
-                api_key TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """)
-            cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key);""")
-
             cur.execute("""
             CREATE TABLE IF NOT EXISTS leads (
                 id SERIAL PRIMARY KEY,
@@ -208,6 +207,20 @@ def _ensure_schema():
             cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_leads_client_label ON leads(client_id, virou_cliente);
             """)
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                client_id TEXT PRIMARY KEY,
+                api_key TEXT,
+                plan TEXT NOT NULL DEFAULT 'trial',
+                status TEXT NOT NULL DEFAULT 'active',
+                usage_month TEXT NOT NULL DEFAULT '',
+                leads_used_month INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """)
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL;")
 
             cur.execute("""
             CREATE TABLE IF NOT EXISTS thresholds (
@@ -429,29 +442,119 @@ def metrics():
 @app.post("/criar_cliente")
 def criar_cliente():
     """
-    Cria (ou garante) um workspace (client_id) e retorna api_key + plano.
-    - Self-service: plan=trial (default)
-    - SaaS mensal: plan=starter/pro
-    - Setup: você pode criar com plan=pro
+    Cria/garante o workspace (client_id) e emite api_key (para SaaS).
+    Body JSON:
+      - client_id (obrigatório)
+      - plan (opcional: trial/starter/pro/vip) — default: trial
     """
     data = request.get_json(force=True) or {}
     client_id = (data.get("client_id") or "").strip()
-    plan = (data.get("plan") or "trial").strip().lower()
-
-    if plan not in PLAN_CATALOG:
-        plan = "trial"
-
     if not client_id:
         return _json_err("client_id obrigatório")
 
-    row = _ensure_client(client_id, plan=plan, status="active")
+    plan = (data.get("plan") or "trial").strip().lower()
+    if plan not in PLAN_CATALOG:
+        plan = "trial"
 
-    # mantém compatibilidade: também garante model_meta (feito em _ensure_client)
+    _ensure_schema()
+
+    # cria meta do modelo se não existir
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO model_meta (client_id, can_train, labeled_count, classes_rotuladas, updated_at)
+                VALUES (%s, FALSE, 0, '[]', NOW())
+                ON CONFLICT (client_id) DO NOTHING
+            """, (client_id,))
+        conn.commit()
+
+    # cria/atualiza client + api_key
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT * FROM clients WHERE client_id=%s""", (client_id,))
+            row = cur.fetchone()
+
+            if not row:
+                row = _ensure_client_row(client_id, plan=plan)
+
+            api_key = (row.get("api_key") or "").strip()
+            if not api_key:
+                api_key = _gen_api_key()
+                cur.execute("""UPDATE clients SET api_key=%s, plan=%s, updated_at=NOW() WHERE client_id=%s""", (api_key, plan, client_id))
+                cur.execute("""SELECT * FROM clients WHERE client_id=%s""", (client_id,))
+                row = cur.fetchone() or row
+
+        conn.commit()
+
+    meta = PLAN_CATALOG.get((row.get("plan") or plan).strip().lower(), PLAN_CATALOG["trial"])
     return _json_ok({
-        "client_id": row.get("client_id", client_id),
-        "plan": row.get("plan", plan),
-        "api_key": row.get("api_key")
+        "client_id": client_id,
+        "plan": (row.get("plan") or plan),
+        "api_key": (row.get("api_key") or api_key),
+        "price_brl_month": meta["price_brl_month"],
+        "lead_limit_month": meta["lead_limit_month"],
     })
+
+@app.get("/client_meta")
+def client_meta():
+    """Retorna plano, preço e consumo mensal para o dashboard."""
+    client_id = (request.args.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    _ensure_schema()
+    row = _ensure_client_row(client_id, plan="trial")
+    meta = PLAN_CATALOG.get((row.get("plan") or "trial").strip().lower(), PLAN_CATALOG["trial"])
+
+    return _json_ok({
+        "client_id": client_id,
+        "plan": (row.get("plan") or "trial"),
+        "status": (row.get("status") or "active"),
+        "price_brl_month": meta["price_brl_month"],
+        "lead_limit_month": meta["lead_limit_month"],
+        "leads_used_this_month": int(row.get("leads_used_month") or 0),
+        "usage_month": (row.get("usage_month") or _month_key()),
+    })
+
+@app.post("/set_plan")
+def set_plan():
+    """Admin: ajusta plano/status de um client_id. Protegido por DEMO_KEY."""
+    ok, err = _require_demo_key()
+    if not ok:
+        return _json_err(err, 401, code="demo_key_required")
+
+    data = request.get_json(force=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    if not client_id:
+        return _json_err("client_id obrigatório")
+
+    plan = (data.get("plan") or "").strip().lower()
+    status = (data.get("status") or "").strip().lower()
+
+    if plan and plan not in PLAN_CATALOG:
+        return _json_err("Plano inválido", 400, allowed=list(PLAN_CATALOG.keys()))
+    if status and status not in ["active", "inactive"]:
+        return _json_err("Status inválido", 400, allowed=["active","inactive"])
+
+    _ensure_schema()
+    _ensure_client_row(client_id, plan=plan or "trial")
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            sets = []
+            vals = []
+            if plan:
+                sets.append("plan=%s")
+                vals.append(plan)
+            if status:
+                sets.append("status=%s")
+                vals.append(status)
+            sets.append("updated_at=NOW()")
+            vals.append(client_id)
+            cur.execute(f"UPDATE clients SET {', '.join(sets)} WHERE client_id=%s", tuple(vals))
+        conn.commit()
+
+    return _json_ok({"client_id": client_id, "plan": plan or None, "status": status or None})
 
 
 @app.post("/prever")
@@ -465,14 +568,24 @@ def prever():
     if not client_id:
         return _json_err("client_id obrigatório")
 
-    ok, msg = _require_api_key(client_id)
-    if not ok:
-        return _json_err(msg, 403)
+    _ensure_schema()
+    client_row = _ensure_client_row(client_id, plan="trial")
+    ok_auth, err = _require_api_key(client_row)
+    if not ok_auth:
+        return _json_err(err, 401, code="auth_required")
 
-    # Limite mensal por plano (para vender SaaS / upgrade)
-    limit_err = _enforce_monthly_lead_limit_or_error(client_id)
-    if limit_err is not None:
-        return limit_err
+    if (client_row.get("status") or "active") != "active":
+        return _json_err("Workspace inativo. Fale com o suporte para reativar.", 403, code="inactive")
+
+    plan = (client_row.get("plan") or "trial").strip().lower()
+    meta = PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"])
+    used = int(client_row.get("leads_used_month") or 0)
+    limit = int(meta.get("lead_limit_month") or 0)
+
+    if limit > 0 and used >= limit:
+        return _json_err("Limite mensal atingido. Faça upgrade para continuar.", 402,
+                         code="plan_limit", plan=plan, used=used, limit=limit,
+                         price_brl_month=meta.get("price_brl_month"))
 
     nome = (data.get("nome") or "").strip()
     email = (data.get("email_lead") or data.get("email") or "").strip()
@@ -500,6 +613,7 @@ def prever():
                 RETURNING id, created_at
             """, (client_id, nome, email, telefone, tempo_site, paginas_visitadas, clicou_preco, float(prob)))
             row = cur.fetchone()
+            cur.execute("""UPDATE clients SET leads_used_month = leads_used_month + 1, updated_at=NOW() WHERE client_id=%s""", (client_id,))
         conn.commit()
 
     return _json_ok({
@@ -509,38 +623,7 @@ def prever():
         "created_at": _iso(row["created_at"])
     })
 
-
-@app.get("/client_meta")
-def client_meta():
-    """Metadados do workspace (para UI)."""
-    client_id = (request.args.get("client_id") or "").strip()
-    if not client_id:
-        return _json_err("client_id obrigatório")
-    row = _client_row(client_id)
-    if not row:
-        return _json_err("workspace não encontrado", 404)
-
-    plan = (row.get("plan") or "trial").strip().lower()
-    limit = _lead_limit_for_plan(plan)
-    used = _count_leads_this_month(client_id)
-
-    return _json_ok({
-        "client_id": row.get("client_id"),
-        "plan": plan,
-        "status": row.get("status"),
-        "price_brl_month": _price_for_plan(plan),
-        "lead_limit_month": limit,
-        "leads_used_this_month": used
-    })
-
-
 @app.get("/dashboard_data")
-
-@app.get("/plan_catalog")
-def plan_catalog():
-    """Catálogo público de planos (para UI)."""
-    return _json_ok({"plans": PLAN_CATALOG})
-
 def dashboard_data():
     """
     Dados para dashboard (últimos 200, já com probabilidade).
@@ -627,10 +710,6 @@ def recalc_pending():
     if not client_id:
         return _json_err("client_id obrigatório")
 
-    ok, msg = _require_api_key(client_id)
-    if not ok:
-        return _json_err(msg, 403)
-
     labeled = _get_labeled_rows(client_id)
     can, reason, classes = _can_train(labeled)
     if not can:
@@ -684,18 +763,6 @@ def auto_threshold():
     client_id = (data.get("client_id") or "").strip()
     if not client_id:
         return _json_err("client_id obrigatório")
-
-    ok, msg = _require_api_key(client_id)
-    if not ok:
-        return _json_err(msg, 403)
-
-    ok, msg = _require_api_key(client_id)
-    if not ok:
-        return _json_err(msg, 403)
-
-    ok, msg = _require_api_key(client_id)
-    if not ok:
-        return _json_err(msg, 403)
 
     labeled = _get_labeled_rows(client_id)
     can, reason, classes = _can_train(labeled)
@@ -830,6 +897,75 @@ def insights():
     ), 200
 
 
+
+@app.post("/demo_public")
+def demo_public():
+    """Demo pública controlada (SEM DEMO_KEY)."""
+    _ensure_schema()
+    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
+    mk = _month_key()
+
+    if not hasattr(app, "_demo_rl"):
+        app._demo_rl = {}
+    rl = app._demo_rl
+    key = f"{ip}:{mk}"
+    if rl.get(key, 0) >= 5:
+        return _json_err("Limite de demos atingido para este IP neste mês.", 429, code="rate_limit")
+    rl[key] = rl.get(key, 0) + 1
+
+    data = request.get_json(silent=True) or {}
+    n = max(10, min(_safe_int(data.get("n"), 30), 30))
+
+    suffix = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(4))
+    client_id = f"demo_{suffix}"
+
+    _ensure_client_row(client_id, plan="demo")
+
+    inserted = 0
+    conv = 0
+    neg = 0
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            for _ in range(n):
+                tempo_site = random.randint(15, 420)
+                paginas = random.randint(1, 10)
+                clicou_preco = random.choice([0, 1])
+
+                base = 0.08
+                base += min(tempo_site / 450, 0.25)
+                base += min(paginas / 12, 0.25)
+                base += 0.22 if clicou_preco else 0.0
+                prob = max(0.03, min(0.97, base + random.uniform(-0.05, 0.05)))
+
+                label = random.choices([None, 1.0, 0.0], weights=[0.45, 0.30, 0.25])[0]
+                if label == 1.0:
+                    conv += 1
+                elif label == 0.0:
+                    neg += 1
+
+                nome = "Demo " + "".join(random.choice(string.ascii_uppercase) for _ in range(4))
+                email = "demo@leadrank.local"
+                telefone = "11999990000"
+
+                cur.execute("""
+                    INSERT INTO leads
+                      (client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco, probabilidade, virou_cliente, created_at)
+                    VALUES
+                      (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                """, (client_id, nome, email, telefone, tempo_site, paginas, clicou_preco, float(prob), label))
+                inserted += 1
+        conn.commit()
+
+    return _json_ok({
+        "client_id": client_id,
+        "inserted": inserted,
+        "converted": conv,
+        "denied": neg,
+        "pending": inserted - conv - neg
+    })
+
+
 @app.post("/seed_demo")
 def seed_demo():
     """
@@ -896,38 +1032,6 @@ def seed_demo():
         "denied": neg,
         "pending": inserted - conv - neg
     }), 200
-
-
-
-@app.post("/demo_public")
-def demo_public():
-    """
-    Demo pública CONTROLADA (sem DEMO_KEY):
-    - Cria workspace demo_<xxxx>
-    - Rate limit por IP
-    - Gera poucos leads (n <= 40)
-    Retorna client_id + api_key (para permitir ações no dashboard).
-    """
-    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
-    if not _demo_public_allow(ip):
-        return _json_err("Muitas demos criadas. Tente novamente mais tarde.", 429)
-
-    data = request.get_json(silent=True) or {}
-    n = int(data.get("n") or 30)
-    n = max(10, min(n, 40))
-
-    suffix = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(4))
-    client_id = f"demo_{suffix}"
-
-    row = _ensure_client(client_id, plan="demo", status="demo")
-    stats = _seed_demo_data(client_id, n=n)
-
-    return _json_ok({
-        "client_id": client_id,
-        "plan": "demo",
-        "api_key": row.get("api_key"),
-        **stats
-    }, 200)
 
 
 # =========================

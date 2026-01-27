@@ -279,14 +279,13 @@
     <section class="hero">
       <div class="badge">⚡ Qualificador de Leads IA</div>
       <h1>Crie sua conta e comece a separar curiosos de compradores</h1>
-      <p class="sub">Planos: <b>Starter</b> R$79/mês • <b>Pro</b> R$179/mês • <b>VIP</b> R$279/mês. Comece no <b>Trial</b> e faça upgrade quando quiser.</p>
       <p>
         Respostas rápidas, coleta de dados e um painel simples para ver os leads.
         Em poucos minutos você já consegue testar o fluxo completo.
       </p>
 
       <ul class="bullets">
-        <li><span class="dot"></span> Cria seu workspace em 1 clique (sem complicação)</li>
+        <li><span class="dot"></span> Captura email e senha com validação</li>
         <li><span class="dot"></span> Cria o <b>client_id</b> automaticamente</li>
         <li><span class="dot"></span> Te leva para o dashboard com 1 clique</li>
       </ul>
@@ -304,8 +303,24 @@
           </div>
         </div>
 
+        <div class="field">
+          <label for="password">Senha</label>
+          <div class="input">
+            <input id="password" name="password" type="password" placeholder="Crie uma senha segura" minlength="6" autocomplete="new-password" required />
+          </div>
+        </div>
 
-        <button id="submitBtn" class="btn" type="submit">Começar agora</button>
+        <div class="row">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input id="showPass" class="toggle" type="checkbox" />
+            <label for="showPass" style="margin:0;color:#cbd5e1;">Mostrar senha</label>
+          </div>
+          <div style="font-size:12px;color:rgba(148,163,184,.85);">
+            mínimo 6 caracteres
+          </div>
+        </div>
+
+        <button id="submitBtn" class="btn" type="submit">Criar conta</button>
       </form>
 
       <div id="msg" class="msg"></div>
@@ -323,25 +338,25 @@
   </div>
 
   <script>
-    // ✅ Ajuste aqui se o seu dashboard estiver em outro endereço
-    const DASHBOARD_URL = "https://qualificador-leads-ia.onrender.com/";
+    // ✅ Ajuste aqui se o seu dashboard estiver em outro endereço (ex: Static Site)
+    const DASHBOARD_URL = "https://qualificador-leads-ia.onrender.com/dashboard.html";
     const API_BASE = "https://qualificador-leads-i-a.onrender.com";
-
-    // precisa bater com o index.html (dashboard)
-    const WS_KEY = "leadrank_workspaces";
-    const WS_LAST = "leadrank_last_workspace";
-    const API_KEYS = "leadrank_api_keys"; // JSON {client_id: api_key}
 
     const form = document.getElementById("onboardingForm");
     const msg = document.getElementById("msg");
     const btn = document.getElementById("submitBtn");
+    const showPass = document.getElementById("showPass");
+    const passwordInput = document.getElementById("password");
 
     const postActions = document.getElementById("postActions");
     const copyBtn = document.getElementById("copyBtn");
     const goDashBtn = document.getElementById("goDashBtn");
 
     let lastClientId = "";
-    let lastApiKey = "";
+
+    showPass.addEventListener("change", () => {
+      passwordInput.type = showPass.checked ? "text" : "password";
+    });
 
     function setMessage(text, type){
       msg.className = "msg show" + (type ? " " + type : "");
@@ -350,59 +365,37 @@
 
     function setLoading(isLoading){
       btn.disabled = isLoading;
-      btn.textContent = isLoading ? "Criando..." : "Começar agora";
+      btn.textContent = isLoading ? "Criando..." : "Criar conta";
     }
 
-    function normalize(s){
-      return String(s||"").toLowerCase().trim()
+    // gera client_id "vendável" a partir do email + sufixo curto
+    function makeClientIdFromEmail(email){
+      const base = (email.split("@")[0] || "cliente")
+        .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "")
-        .slice(0, 22);
-    }
+        .slice(0, 18);
 
-    function makeClientId(email){
-      const base = normalize((email||"").split("@")[0] || "workspace");
-      const suffix = Math.random().toString(36).slice(2,6);
+      const suffix = Math.random().toString(36).slice(2, 6); // 4 chars
       return `${base}_${suffix}`;
-    }
-
-    function loadWorkspaces(){
-      try{
-        const v = JSON.parse(localStorage.getItem(WS_KEY) || "[]");
-        return Array.isArray(v) ? v : [];
-      }catch(e){ return []; }
-    }
-
-    function saveWorkspaces(list){
-      localStorage.setItem(WS_KEY, JSON.stringify(list));
-    }
-
-    function saveApiKey(clientId, apiKey){
-      try{
-        const m = JSON.parse(localStorage.getItem(API_KEYS) || "{}");
-        m[clientId] = apiKey;
-        localStorage.setItem(API_KEYS, JSON.stringify(m));
-      }catch(e){
-        localStorage.setItem(API_KEYS, JSON.stringify({[clientId]: apiKey}));
-      }
     }
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
 
       const email = document.getElementById("email").value.trim();
+
       if (!email) {
-        setMessage("⚠️ Digite um email válido.", "error");
+        setMessage("⚠️ Informe seu email para criar o workspace.", "error");
         return;
       }
 
       setLoading(true);
       postActions.style.display = "none";
       lastClientId = "";
-      lastApiKey = "";
 
       try{
-        const client_id = makeClientId(email);
+        const client_id = makeClientIdFromEmail(email);
 
         const res = await fetch(`${API_BASE}/criar_cliente`, {
           method: "POST",
@@ -414,21 +407,25 @@
 
         if (res.ok && data && data.ok) {
           lastClientId = data.client_id || client_id;
-          lastApiKey = data.api_key || "";
+          const apiKey = (data.api_key || "").trim();
 
-          // salva pro dashboard
-          const list = loadWorkspaces();
-          if (!list.includes(lastClientId)) list.push(lastClientId);
-          saveWorkspaces(list);
-          localStorage.setItem(WS_LAST, lastClientId);
+          localStorage.setItem("client_id", lastClientId);
+          if (apiKey) localStorage.setItem("api_key", apiKey);
 
-          // salva api_key (se vier)
-          if (lastApiKey) saveApiKey(lastClientId, lastApiKey);
-
-          setMessage(`✅ Workspace criado! <br/>Seu <b>client_id</b>: <code style="background:rgba(2,6,23,.35);padding:2px 6px;border-radius:8px;border:1px solid rgba(148,163,184,.18);">${lastClientId}</code>`, "success");
+          setMessage(
+            `✅ Workspace criado!<br/>
+             <div style="margin-top:10px">
+               <div style="opacity:.9">Seu <b>workspace</b>:</div>
+               <code style="background:rgba(2,6,23,.35);padding:2px 6px;border-radius:8px;border:1px solid rgba(148,163,184,.18);">${lastClientId}</code>
+             </div>
+             <div style="margin-top:10px; opacity:.85; font-size:13px">
+               Plano <b>${data.plan || "trial"}</b> • Limite mensal: <b>${data.lead_limit_month ?? "—"}</b>
+             </div>`,
+            "success"
+          );
           postActions.style.display = "flex";
         } else {
-          const errMsg = (data && data.error) ? data.error : "Erro ao criar workspace.";
+          const errMsg = (data && (data.error || data.reason)) ? (data.error || data.reason) : "Erro ao criar workspace.";
           setMessage(`❌ ${errMsg}`, "error");
         }
 
@@ -450,6 +447,7 @@
     });
 
     goDashBtn.addEventListener("click", () => {
+      // Se seu dashboard pede client_id, você já salvou no localStorage.
       window.location.href = DASHBOARD_URL;
     });
   </script>

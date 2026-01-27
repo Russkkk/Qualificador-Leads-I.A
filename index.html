@@ -109,7 +109,6 @@
     .panelHeaderLeft{ display:flex; flex-direction:column; gap:2px; }
     .panelHeaderRight{ display:flex; align-items:center; gap: 10px; flex-wrap: wrap; justify-content:flex-end; }
     .pill{
-
       display:inline-flex; align-items:center; gap: 6px;
       padding: 6px 10px; border-radius: 999px;
       border: 1px solid rgba(255,255,255,0.14);
@@ -117,8 +116,6 @@
       font-size: 12px; color: rgba(255,255,255,0.85);
       white-space: nowrap;
     }
-.pill.warn{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.10)}
-.pill.danger{border-color:rgba(239,68,68,.55);background:rgba(239,68,68,.12)}
     .split{ display:grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; padding: 14px; }
     .split > .card{ box-shadow:none; }
     .chartWrap{ height: 260px; }
@@ -208,8 +205,6 @@
       .input, .select{ width: 100%; }
       .topbar{ top: 10px; }
     }
-  
-    .planbar{ display:flex; gap:10px; align-items:center; }
   </style>
 </head>
 <body>
@@ -223,13 +218,7 @@
           <div class="tabs">
             <button class="tab active" id="tabDash">📊 Dashboard</button>
             <button class="tab" id="tabInsights">📈 Insights</button>
-          
-
-      <div class="planbar">
-        <span class="pill" id="pillPlan">plano: —</span>
-        <a class="btn small" id="btnUpgrade" href="https://wa.me/5511999999999?text=Quero%20ativar%20LeadRank%20(Starter%20R%2479%2C%20Pro%20R%24179%2C%20VIP%20R%24279)%20-%20meu%20workspace%20%C3%A9%3A%20" target="_blank" rel="noreferrer">⚡ Ativar plano</a>
-      </div>
-</div>
+          </div>
         </div>
       </div>
 
@@ -417,6 +406,44 @@
   // ✅ Backend oficial
   const BACKEND = "https://qualificador-leads-i-a.onrender.com";
 
+  // ===== Monetização / Upgrade =====
+  function openUpgradeModal(info){
+    const ws = localStorage.getItem("client_id") || "";
+    const base = "https://wa.me/5518988277992";
+    const build = (planLabel) => encodeURIComponent(
+      `Quero ativar o LeadRank (${planLabel}).\nWorkspace: ${ws}\nUso do mês: ${(info && info.used != null) ? info.used : "?"}/${(info && info.limit != null) ? info.limit : "?"}`
+    );
+
+    const s = document.getElementById("upStarter");
+    const p = document.getElementById("upPro");
+    const v = document.getElementById("upVip");
+    if (s) s.href = `${base}?text=${build("Starter R$79/mês")}`;
+    if (p) p.href = `${base}?text=${build("Pro R$179/mês")}`;
+    if (v) v.href = `${base}?text=${build("VIP R$279/mês")}`;
+
+    const modal = document.getElementById("upgradeModal");
+    if (modal) modal.style.display = "flex";
+  }
+
+  function closeUpgradeModal(){
+    const modal = document.getElementById("upgradeModal");
+    if (modal) modal.style.display = "none";
+  }
+
+  // Reset mensal (client-side): quando virar o mês, limpa caches locais e recarrega meta
+  function ensureMonthlyReset(){
+    const now = new Date();
+    const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const prev = localStorage.getItem("lr_month_key");
+    if (prev && prev !== key){
+      // limpe apenas chaves de UI/caches (não apaga client_id/api_key)
+      localStorage.removeItem("lr_meta_cache");
+      localStorage.removeItem("lr_leads_cache");
+    }
+    localStorage.setItem("lr_month_key", key);
+  }
+
+
   // UX bands
   const HOT_MIN  = 0.70;
   const WARM_MIN = 0.40;
@@ -425,7 +452,6 @@
   const WS_KEY = "leadrank_workspaces";
   const WS_LAST = "leadrank_last_workspace";
   const DEMO_KEY_STORE = "leadrank_demo_key"; // sessionStorage
-  const API_KEYS = "leadrank_api_keys"; // localStorage JSON {client_id: api_key}
 
   let chartDash = null;
   let chartInsBar = null;
@@ -503,62 +529,23 @@
     else sel.value = list[0];
   }
 
-  
-  async function refreshPlan(){
-    const clientId = getWorkspace();
-    const pill = document.getElementById("pillPlan");
-    if (!pill) return;
-    if (!clientId){ pill.textContent = "plano: —"; return; }
-
-    try{
-      const meta = await api(`/client_meta?client_id=${encodeURIComponent(clientId)}`);
-      const plan = (meta.plan || "—").toLowerCase();
-      const price = (meta.price_brl_month ?? null);
-      const used = (meta.leads_used_this_month ?? null);
-      const limit = (meta.lead_limit_month ?? null);
-
-      let parts = [`plano: ${plan}`];
-      if (price !== null) parts.push(`R$${price}/mês`);
-      if (limit !== null && used !== null) parts.push(`${used}/${limit} leads (mês)`);
-      pill.textContent = parts.join(" • ");
-
-      const up = document.getElementById("btnUpgrade");
-      if (up && up.href){
-        // garante que o link leve o workspace junto (pra facilitar fechamento no WhatsApp)
-        const base = up.href.split("%20workspace%20%C3%A9%3A%20")[0] + "%20workspace%20%C3%A9%3A%20";
-        up.href = base + encodeURIComponent(clientId);
-      }
-
-      // reforço visual se perto/estourado
-      pill.classList.remove("warn","danger");
-      if (limit !== null && used !== null){
-        const pct = limit > 0 ? (used/limit) : 0;
-        if (pct >= 1) pill.classList.add("danger");
-        else if (pct >= 0.8) pill.classList.add("warn");
-      }
-    }catch(e){
-      pill.textContent = "plano: —";
-    }
-  }
-
-async function api(path, opts={}){
+  async function api(path, opts={}){
     const url = BACKEND + path;
 
-    // custom option: authClientId (injeta X-API-KEY quando necessário)
-    const authClientId = opts.authClientId;
-    if (authClientId){
-      try{
-        const m = JSON.parse(localStorage.getItem(API_KEYS) || "{}");
-        const k = m[authClientId];
-        if (k){
-          opts.headers = Object.assign({}, (opts.headers||{}), {"X-API-KEY": k});
-        }
-      }catch(e){}
-    }
+    // Injeta API Key em todas as chamadas (SaaS)
+    const apiKey = (localStorage.getItem("api_key") || "").trim();
+    const headers = Object.assign({}, (opts.headers || {}));
+    if (apiKey) headers["X-API-KEY"] = apiKey;
+    opts.headers = headers;
 
     const res = await fetch(url, opts);
     let data = null;
     try{ data = await res.json(); } catch(e){}
+    // Se estourou limite do plano, abre modal e interrompe a ação
+    if (res.status === 402 && data && data.code === "plan_limit"){
+      openUpgradeModal(data);
+      throw new Error("Limite do plano atingido");
+    }
     if (!res.ok){
       const msg = (data && (data.error || data.reason)) ? (data.error || data.reason) : `Erro HTTP ${res.status}`;
       throw new Error(msg);
@@ -805,7 +792,6 @@ async function api(path, opts={}){
       renderChartDash(leads);
 
       document.getElementById("subTitle").textContent = `Workspace: ${clientId} • ${leads.length} leads (ordenados por score).`;
-      refreshPlan();
       toast("Dados carregados ✅");
     }catch(err){
       document.getElementById("subTitle").textContent = "Erro ao carregar.";
@@ -821,8 +807,7 @@ async function api(path, opts={}){
       await api(path, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({client_id: clientId, lead_id: leadId}),
-          authClientId: clientId
+        body: JSON.stringify({client_id: clientId, lead_id: leadId})
       });
       await carregar();
       toast(label === 1 ? "Marcado como convertido ✅" : "Marcado como negado ❌");
@@ -836,7 +821,7 @@ async function api(path, opts={}){
     const clientId = getWorkspace();
     if (!clientId) return toast("Selecione um workspace.");
     try{
-      const res = await api(`/recalc_pending?client_id=${encodeURIComponent(clientId)}&limit=500`, {authClientId: clientId});
+      const res = await api(`/recalc_pending?client_id=${encodeURIComponent(clientId)}&limit=500`);
       toast(`Recalculado: ${res.updated || 0} leads ✅`);
       await carregar();
     }catch(err){
@@ -851,8 +836,7 @@ async function api(path, opts={}){
       const res = await api(`/auto_threshold`, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({client_id: clientId}),
-         authClientId: clientId
+        body: JSON.stringify({client_id: clientId})
       });
       savedThreshold = res.threshold;
       document.getElementById("pillThreshold").textContent = `threshold: ${Number(savedThreshold).toFixed(2)}`;
@@ -938,57 +922,23 @@ async function api(path, opts={}){
     const clientId = getWorkspace();
     if (!clientId) return toast("Selecione um workspace.");
 
-    // 1) Se você tiver DEMO_KEY (modo interno), usa o seed_demo protegido (mantém segurança)
     let key = sessionStorage.getItem(DEMO_KEY_STORE) || "";
-    if (key){
-      try{
-        const res = await api(`/seed_demo`, {
-          method: "POST",
-          headers: {"Content-Type":"application/json", "X-DEMO-KEY": key},
-          body: JSON.stringify({client_id: clientId, n: 30})
-        });
-        toast(`Demo gerada ✅ (${res.inserted} leads)`);
-        await carregar();
-        return;
-      }catch(err){
-        toast("Erro: " + err.message + " (Se mudou a key, recarregue a página e tente de novo.)");
-        return;
-      }
+    if (!key){
+      key = prompt("Cole sua DEMO_KEY (Render → Backend → Environment):");
+      if (!key) return;
+      sessionStorage.setItem(DEMO_KEY_STORE, key);
     }
 
-    // 2) Se NÃO tiver DEMO_KEY, usa demo_public (sem pedir nada) — CONTROLADA no backend
     try{
-      const res = await api(`/demo_public`, {
+      const res = await api(`/seed_demo`, {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({n: 30})
+        headers: {"Content-Type":"application/json", "X-DEMO-KEY": key},
+        body: JSON.stringify({client_id: clientId, n: 30})
       });
-
-      // salva workspace + api_key retornada
-      const demoWs = res.client_id;
-      const apiKey = res.api_key;
-
-      const list = loadWorkspaces();
-      if (!list.includes(demoWs)) list.push(demoWs);
-      saveWorkspaces(list);
-      localStorage.setItem(WS_LAST, demoWs);
-
-      if (apiKey){
-        try{
-          const m = JSON.parse(localStorage.getItem(API_KEYS) || "{}");
-          m[demoWs] = apiKey;
-          localStorage.setItem(API_KEYS, JSON.stringify(m));
-        }catch(e){
-          localStorage.setItem(API_KEYS, JSON.stringify({[demoWs]: apiKey}));
-        }
-      }
-
-      renderWorkspaces();
-      document.getElementById("workspace").value = demoWs;
-      toast(`Demo pronta ✅ (${res.inserted} leads)`);
+      toast(`Demo gerada ✅ (${res.inserted} leads)`);
       await carregar();
     }catch(err){
-      toast("Erro: " + err.message);
+      toast("Erro: " + err.message + " (Se mudou a key, recarregue a página e tente de novo.)");
     }
   }
 
@@ -1042,7 +992,6 @@ async function api(path, opts={}){
     renderWorkspaces();
     document.getElementById("workspace").value = w;
     localStorage.setItem(WS_LAST, w);
-    refreshPlan();
     toast("Workspace criado ✅");
   });
 
@@ -1067,11 +1016,41 @@ async function api(path, opts={}){
 
   // Init
   renderWorkspaces();
-  refreshPlan();
   document.getElementById("backendLabel").textContent = BACKEND;
 
   // Auto-load
   carregar();
+
+  document.addEventListener("DOMContentLoaded", () => {
+    ensureMonthlyReset();
+
+    const upClose = document.getElementById("upClose");
+    if (upClose) upClose.addEventListener("click", closeUpgradeModal);
+
+    const upModal = document.getElementById("upgradeModal");
+    if (upModal) upModal.addEventListener("click", (e)=>{ if (e.target === upModal) closeUpgradeModal(); });
+  });
+
 </script>
+
+  <!-- Upgrade Modal (auto abre quando estoura o limite do plano) -->
+  <div id="upgradeModal" style="position:fixed; inset:0; background:rgba(2,6,23,.85); display:none; align-items:center; justify-content:center; z-index:9999;">
+    <div style="background:#020617; border:1px solid rgba(148,163,184,.18); border-radius:16px; padding:24px; width:100%; max-width:420px;">
+      <h2 style="margin:0 0 8px 0;">🚀 Limite do plano atingido</h2>
+      <p style="margin:0 0 16px 0; opacity:.85;">
+        Você atingiu o limite mensal do seu plano. <br/>
+        Ative um plano para continuar qualificando leads.
+      </p>
+
+      <div style="display:grid; gap:12px;">
+        <a class="btn" id="upStarter" target="_blank" rel="noreferrer">Starter · R$79</a>
+        <a class="btn" id="upPro" target="_blank" rel="noreferrer">Pro · R$179</a>
+        <a class="btn" id="upVip" target="_blank" rel="noreferrer">VIP · R$279</a>
+      </div>
+
+      <button class="btn ghost" id="upClose" style="margin-top:12px; width:100%;">Depois</button>
+    </div>
+  </div>
+
 </body>
 </html>
