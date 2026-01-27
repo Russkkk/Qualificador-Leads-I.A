@@ -37,6 +37,30 @@ CORS(app, resources={r"/*": {"origins": [
 ]}})
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+# --- DB bootstrap/migrations (auto) ---
+_SCHEMA_READY = False
+_SCHEMA_LOCK = None  # lazy init
+
+def _raw_conn():
+    """Connection without triggering schema bootstrapping (used by migrations)."""
+    _db_required()
+    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+
+def _ensure_schema_once():
+    """Run lightweight migrations once per process. Safe to call many times."""
+    global _SCHEMA_READY, _SCHEMA_LOCK
+    if _SCHEMA_READY:
+        return
+    if _SCHEMA_LOCK is None:
+        import threading as _t
+        _SCHEMA_LOCK = _t.Lock()
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY:
+            return
+        _ensure_schema()
+        _SCHEMA_READY = True
+
 DEMO_KEY = (os.getenv("DEMO_KEY") or "").strip()
 
 # Parâmetros padrões
@@ -75,6 +99,8 @@ def _db_required():
 
 def db_conn():
     _db_required()
+    # Ensure schema/migrations before returning connections for normal operations
+    _ensure_schema_once()
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 def _safe_int(x, default=0):
@@ -181,11 +207,15 @@ def _require_api_key(client_row: Dict[str, Any]) -> Tuple[bool, str]:
     return True, ""
 def _ensure_schema():
     """
-    Cria tabelas mínimas necessárias para Postgres.
-    Executa com IF NOT EXISTS.
+    Cria tabelas mínimas necessárias para Postgres e aplica migrações leves (ADD COLUMN IF NOT EXISTS)
+    para evitar 500 quando o schema já existe em versão antiga.
+
+    IMPORTANTE: Render/Postgres às vezes já tem a tabela criada por versões anteriores.
+    CREATE TABLE IF NOT EXISTS não adiciona colunas novas — por isso usamos ALTER TABLE.
     """
     with db_conn() as conn:
         with conn.cursor() as cur:
+            # --- leads ---
             cur.execute("""
             CREATE TABLE IF NOT EXISTS leads (
                 id SERIAL PRIMARY KEY,
@@ -201,13 +231,10 @@ def _ensure_schema():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
             """)
-            cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_leads_client_created ON leads(client_id, created_at DESC);
-            """)
-            cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_leads_client_label ON leads(client_id, virou_cliente);
-            """)
+            cur.execute("""CREATE INDEX IF NOT EXISTS idx_leads_client_created ON leads(client_id, created_at DESC);""")
+            cur.execute("""CREATE INDEX IF NOT EXISTS idx_leads_client_label ON leads(client_id, virou_cliente);""")
 
+            # --- clients (workspace / monetização) ---
             cur.execute("""
             CREATE TABLE IF NOT EXISTS clients (
                 client_id TEXT PRIMARY KEY,
@@ -220,8 +247,23 @@ def _ensure_schema():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
             """)
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL;")
+            # Migrações (para bancos já existentes)
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_key TEXT;""")
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'trial';""")
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';""")
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS usage_month TEXT;""")
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS leads_used_month INTEGER NOT NULL DEFAULT 0;""")
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();""")
+            cur.execute("""ALTER TABLE clients ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();""")
 
+            # Garante defaults onde fizer sentido
+            mk = _month_key()
+            cur.execute("""UPDATE clients SET usage_month=%s WHERE usage_month IS NULL OR usage_month='';""", (mk,))
+            cur.execute("""UPDATE clients SET updated_at=NOW() WHERE updated_at IS NULL;""")
+
+            cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL;""")
+
+            # --- thresholds ---
             cur.execute("""
             CREATE TABLE IF NOT EXISTS thresholds (
                 client_id TEXT PRIMARY KEY,
@@ -230,6 +272,7 @@ def _ensure_schema():
             );
             """)
 
+            # --- model_meta ---
             cur.execute("""
             CREATE TABLE IF NOT EXISTS model_meta (
                 client_id TEXT PRIMARY KEY,
@@ -413,6 +456,19 @@ def health():
     # Não falha mesmo se DB off, mas avisa
     db_ok = bool(DATABASE_URL)
     return jsonify({"ok": True, "db_configured": db_ok, "ts": _iso(_now_utc())})
+
+@app.get("/health_db")
+def health_db():
+    """Healthcheck que realmente toca no Postgres e aplica migrações leves."""
+    try:
+        _ensure_schema_once()
+        with _raw_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok;")
+                row = cur.fetchone()
+        return jsonify({"ok": True, "db": True, "ts": _iso(_now_utc()), "select1": (row.get("ok") if row else 1)})
+    except Exception as e:
+        return jsonify({"ok": False, "db": False, "error": repr(e), "ts": _iso(_now_utc())}), 500
 
 @app.get("/metrics")
 def metrics():
