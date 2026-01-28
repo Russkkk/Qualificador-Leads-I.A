@@ -77,7 +77,7 @@ _DEMO_RL_MAX = 5
 # App
 # =========================
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, allow_headers=["Content-Type","Authorization","x-demo-key","X-DEMO-KEY","x-api-key","X-API-KEY"], expose_headers=["Content-Disposition"])
+CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 
 
 # =========================
@@ -204,6 +204,37 @@ def _gen_api_key(client_id: str) -> str:
 def _get_header(name: str) -> str:
     return (request.headers.get(name) or "").strip()
 
+def _require_demo_key() -> tuple[bool, str | None]:
+    """Valida DEMO_KEY de forma compatível (header/query/body)."""
+    expected = (os.getenv("DEMO_KEY") or "").strip()
+    if not expected:
+        return False, "DEMO_KEY não configurada no ambiente"
+
+    # aceita header (qualquer case), Authorization Bearer, query param e body
+    got = (
+        (request.headers.get("x-demo-key") or request.headers.get("X-DEMO-KEY") or "").strip()
+    )
+    if not got:
+        auth = (request.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            got = auth.split(" ", 1)[1].strip()
+
+    if not got:
+        got = (request.args.get("demo_key") or "").strip()
+
+    if not got:
+        data = request.get_json(silent=True) or {}
+        got = (data.get("demo_key") or "").strip()
+
+    if not got:
+        return False, "DEMO_KEY ausente"
+
+    if got != expected:
+        return False, "DEMO_KEY inválida"
+
+    return True, None
+
+
 def _get_api_key_from_headers() -> str:
     key = _get_header("X-API-KEY") or _get_header("Authorization")
     if key.lower().startswith("bearer "):
@@ -214,18 +245,8 @@ def _client_ip() -> str:
     return (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
 
 def _check_demo_key() -> bool:
-    """Valida DEMO_KEY enviada pelo frontend.
-
-    Observação: navegadores exigem que o CORS permita o header `x-demo-key`.
-    """
-    expected = (os.getenv("DEMO_KEY") or "").strip()
-    if not expected:
-        return False
-    got = (_get_header("x-demo-key") or _get_header("X-DEMO-KEY") or _get_header("authorization"))
-    # Suporta Authorization: Bearer <key> opcionalmente
-    if got.lower().startswith("bearer "):
-        got = got[7:].strip()
-    return bool(got) and got == expected
+    ok, _ = _require_demo_key()
+    return ok
 
 
 # =========================
@@ -737,8 +758,9 @@ def client_meta():
 @app.post("/set_plan")
 def set_plan():
     """Admin: ajusta plano/status de um client_id. Protegido por DEMO_KEY."""
-    if not _check_demo_key():
-        return _json_err("Unauthorized (DEMO_KEY)", 403)
+    ok, err = _require_demo_key()
+    if not ok:
+        return _json_err("Unauthorized (DEMO_KEY)", 403, reason=err)
 
     data = request.get_json(silent=True) or {}
     client_id = (data.get("client_id") or "").strip()
@@ -1321,8 +1343,9 @@ def demo_public():
 @app.post("/seed_demo")
 def seed_demo():
     """Gera dados demo para um client_id (protegido por DEMO_KEY)."""
-    if not _check_demo_key():
-        return _json_err("Unauthorized (DEMO_KEY)", 403)
+    ok, err = _require_demo_key()
+    if not ok:
+        return _json_err("Unauthorized (DEMO_KEY)", 403, reason=err)
 
     data = request.get_json(silent=True) or {}
     client_id = (data.get("client_id") or "").strip()
@@ -1394,7 +1417,8 @@ def _stripe_price_id(plan: str) -> Optional[str]:
         return None
 
 def _admin_required() -> bool:
-    return _check_demo_key()
+    ok, _ = _require_demo_key()
+    return ok
 
 def _upsert_subscription(client_id: str, plan: str, status: str, provider: str = "manual",
                          period_start: Optional[datetime] = None, period_end: Optional[datetime] = None,
