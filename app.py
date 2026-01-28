@@ -361,14 +361,14 @@ def _ensure_schema():
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
 
-cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nome TEXT;")
-cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;")
-cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS empresa TEXT;")
-cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS telefone TEXT;")
-cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nome TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS empresa TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS telefone TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;")
 
 # índices/uniques (email pode ser NULL em workspaces antigos)
-cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
 
                 mk = _month_key()
                 # normaliza NULLs antigos
