@@ -40,7 +40,7 @@ except Exception:
 # Config
 # =========================
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-DEMO_KEY = (os.getenv("DEMO_KEY") or "").strip()
+DEMO_KEY = os.environ.get("DEMO_KEY", "").strip()
 
 # ajuste aqui seus domínios permitidos no CORS
 ALLOWED_ORIGINS = [
@@ -83,22 +83,6 @@ CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 # =========================
 # Utils
 # =========================
-def _require_demo_key():
-    """
-    Valida DEMO_KEY enviada pelo frontend via header x-demo-key
-    """
-    if not DEMO_KEY:
-        return False, "DEMO_KEY não configurada no ambiente"
-
-    req_key = request.headers.get("x-demo-key")
-    if not req_key:
-        return False, "DEMO_KEY ausente"
-
-    if req_key != DEMO_KEY:
-        return False, "DEMO_KEY inválida"
-
-    return True, None
-
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -228,6 +212,13 @@ def _get_api_key_from_headers() -> str:
 
 def _client_ip() -> str:
     return (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
+
+def _check_demo_key() -> bool:
+    expected = (os.getenv("DEMO_KEY") or "").strip()
+    got = _get_header("X-DEMO-KEY")
+    return bool(expected) and got == expected
+
+
 # =========================
 # Schema / Migrations (auto)
 # =========================
@@ -342,12 +333,10 @@ def _ensure_schema():
                 mk = _month_key()
                 # normaliza NULLs antigos
                 cur.execute("UPDATE clients SET usage_month=%s WHERE usage_month IS NULL OR usage_month='';", (mk,))
-                cur.execute("UPDATE clients SET api_key=NULL WHERE api_key='' OR api_key IS NULL;")
+                cur.execute("UPDATE clients SET api_key='' WHERE api_key IS NULL;")
                 cur.execute("UPDATE clients SET updated_at=NOW() WHERE updated_at IS NULL;")
 
-                # PATCH: evita colisão de api_key vazia em clientes trial
-                cur.execute("DROP INDEX IF EXISTS idx_clients_api_key;")
-                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL AND api_key <> ''; ")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key <> '';")
 
                 # -------------------------
                 # THRESHOLDS / MODEL_META (para insights/treino)
@@ -400,7 +389,7 @@ def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
                 # cria se não existir
                 cur.execute("""
                     INSERT INTO clients (client_id, api_key, plan, status, usage_month, leads_used_month, updated_at)
-                    VALUES (%s, NULL, %s, 'active', %s, 0, NOW())
+                    VALUES (%s, '', %s, 'active', %s, 0, NOW())
                     ON CONFLICT (client_id) DO NOTHING
                 """, (client_id, plan, mk))
 
@@ -416,6 +405,11 @@ def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
                     cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
                     row = cur.fetchone() or row
 
+                # garante api_key não nulo (evita NotNullViolation em bancos antigos)
+                if row.get("api_key") is None:
+                    cur.execute("UPDATE clients SET api_key='' WHERE client_id=%s", (client_id,))
+                    cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
+                    row = cur.fetchone() or row
 
         return dict(row)
     finally:
@@ -773,9 +767,6 @@ def set_plan():
 
 @app.post("/prever")
 def prever():
-    ok, err = _require_demo_key()
-if not ok:
-    return jsonify({"error": "Unauthorized (DEMO_KEY)", "reason": err}), 401
     """
     POST /prever
     Body:
@@ -892,24 +883,25 @@ if not ok:
 
 @app.get("/dashboard_data")
 def dashboard_data():
-    ok, err = _require_demo_key()
-    if not ok:
-        return _json_err("Unauthorized (DEMO_KEY)", 401, reason=err)
-
     client_id = (request.args.get("client_id") or "").strip()
+    limit = _safe_int(request.args.get("limit"), DEFAULT_LIMIT)
+    limit = max(10, min(limit, 1000))
+
+    if not client_id:
+        return _json_err("client_id obrigatório", 400)
+
     ok_auth, _, msg = _require_client_auth(client_id)
     if not ok_auth:
-        return _json_err("Unauthorized (client)", 403, reason=msg)
+        return _json_err(msg, 403, code="auth_required")
 
-    # ---- resto do código original do dashboard ----
-    # NÃO MUDE NADA ABAIXO DISSO
-
+    rows = _fetch_recent_leads(client_id, limit=limit)
+    convertidos, negados, pendentes = _count_status(rows)
 
     # Premium (C1): Top origens (30d) + Hot leads de hoje (America/Sao_Paulo)
-top_origens = _top_origens(client_id, days=30, limit=6)
-hot_leads_today = _hot_leads_today(client_id, limit=20)
+    top_origens = _top_origens(client_id, days=30, limit=6)
+    hot_leads_today = _hot_leads_today(client_id, limit=20)
 
-def norm(r: Dict[str, Any]) -> Dict[str, Any]:
+    def norm(r: Dict[str, Any]) -> Dict[str, Any]:
         rr = dict(r)
         rr["created_at"] = _iso(rr.get("created_at"))
         return rr
