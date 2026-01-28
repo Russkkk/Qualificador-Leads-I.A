@@ -77,7 +77,7 @@ _DEMO_RL_MAX = 5
 # App
 # =========================
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
+CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}}, allow_headers=["Content-Type","Authorization","x-demo-key","X-DEMO-KEY","x-api-key","X-API-KEY"], expose_headers=["Content-Disposition"])
 
 
 # =========================
@@ -214,9 +214,18 @@ def _client_ip() -> str:
     return (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
 
 def _check_demo_key() -> bool:
+    """Valida DEMO_KEY enviada pelo frontend.
+
+    Observação: navegadores exigem que o CORS permita o header `x-demo-key`.
+    """
     expected = (os.getenv("DEMO_KEY") or "").strip()
-    got = _get_header("X-DEMO-KEY")
-    return bool(expected) and got == expected
+    if not expected:
+        return False
+    got = (_get_header("x-demo-key") or _get_header("X-DEMO-KEY") or _get_header("authorization"))
+    # Suporta Authorization: Bearer <key> opcionalmente
+    if got.lower().startswith("bearer "):
+        got = got[7:].strip()
+    return bool(got) and got == expected
 
 
 # =========================
