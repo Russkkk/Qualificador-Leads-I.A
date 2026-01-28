@@ -1,9 +1,0 @@
-flask
-flask-cors
-pandas
-scikit-learn
-gunicorn
-numpy
-werkzeug
-psycopg2-binary
-requests
