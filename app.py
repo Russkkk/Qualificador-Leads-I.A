@@ -892,22 +892,18 @@ if not ok:
 
 @app.get("/dashboard_data")
 def dashboard_data():
-        ok, err = _require_demo_key()
-if not ok:
-        return jsonify({"error": "Unauthorized (DEMO_KEY)", "reason": err}), 401
-client_id = (request.args.get("client_id") or "").strip()
-limit = _safe_int(request.args.get("limit"), DEFAULT_LIMIT)
-limit = max(10, min(limit, 1000))
+    ok, err = _require_demo_key()
+    if not ok:
+        return _json_err("Unauthorized (DEMO_KEY)", 401, reason=err)
 
-if not client_id:
-        return _json_err("client_id obrigatório", 400)
-
+    client_id = (request.args.get("client_id") or "").strip()
     ok_auth, _, msg = _require_client_auth(client_id)
-if not ok_auth:
-        return _json_err(msg, 403, code="auth_required")
+    if not ok_auth:
+        return _json_err("Unauthorized (client)", 403, reason=msg)
 
-    rows = _fetch_recent_leads(client_id, limit=limit)
-convertidos, negados, pendentes = _count_status(rows)
+    # ---- resto do código original do dashboard ----
+    # NÃO MUDE NADA ABAIXO DISSO
+
 
     # Premium (C1): Top origens (30d) + Hot leads de hoje (America/Sao_Paulo)
 top_origens = _top_origens(client_id, days=30, limit=6)
