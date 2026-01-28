@@ -59,8 +59,8 @@
           <p class="muted">Dica: você pode abrir esta página com <code>?demo_key=...</code> para setar a chave automaticamente.</p>
         </div>
         <div style="display:flex; gap:10px; align-items:center;">
-          <a class="btn btn-primary" href="./onboarding.html">Começar agora</a>
-          <a class="btn" href="./index.html">Ver Dashboard</a>
+          <a class="btn btn-primary" href="./onboarding.html">Testar grátis</a>
+          <a class="btn" href="./pricing.html">Ver preços</a>
         </div>
       </div>
     </div>
@@ -228,5 +228,42 @@
   });
 </script>
 
+<script>
+  // ===== LeadRank auth helper (client_id + api_key) =====
+  const LR_BACKEND = (window.BACKEND_URL || "https://qualificador-leads-i-a.onrender.com").replace(/\/$/, "");
+  function qs(k){ try { return new URLSearchParams(location.search).get(k); } catch(e){ return null; } }
+
+  function setWorkspace(clientId, apiKey){
+    if (clientId) localStorage.setItem("LR_CLIENT_ID", String(clientId).trim());
+    if (apiKey) localStorage.setItem("LR_API_KEY", String(apiKey).trim());
+  }
+  function getWorkspace(){
+    const client_id = (localStorage.getItem("LR_CLIENT_ID")||"").trim();
+    const api_key = (localStorage.getItem("LR_API_KEY")||"").trim();
+    return { client_id: client_id || null, api_key: api_key || null };
+  }
+  function bootWorkspaceFromQuery(){
+    const cid = qs("client_id");
+    const key = qs("api_key") || qs("demo_key"); // compat
+    if (cid || key) setWorkspace(cid, key);
+  }
+  async function lrApi(path, opts={}){
+    const ws = getWorkspace();
+    if (!ws.client_id) throw new Error("client_id ausente. Faça signup (trial) ou informe o client_id.");
+    const url = LR_BACKEND + path + (path.includes("?") ? "&" : "?") + "client_id=" + encodeURIComponent(ws.client_id);
+    const headers = {
+      "Content-Type": "application/json",
+      ...(ws.api_key ? { "X-API-KEY": ws.api_key } : {}),
+      ...(opts.headers || {})
+    };
+    const res = await fetch(url, { ...opts, headers });
+    let data = null;
+    try { data = await res.json(); } catch(e) {}
+    if (!res.ok) throw new Error((data && (data.error||data.reason)) ? (data.error||data.reason) : ("Erro HTTP " + res.status));
+    return data;
+  }
+  window.__lr = { LR_BACKEND, setWorkspace, getWorkspace, bootWorkspaceFromQuery, lrApi };
+  bootWorkspaceFromQuery();
+</script>
 </body>
 </html>

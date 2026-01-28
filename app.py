@@ -11,6 +11,7 @@
 
 import os
 import json
+import re
 import time
 import random
 import string
@@ -360,6 +361,15 @@ def _ensure_schema():
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
 
+cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nome TEXT;")
+cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;")
+cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS empresa TEXT;")
+cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS telefone TEXT;")
+cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;")
+
+# índices/uniques (email pode ser NULL em workspaces antigos)
+cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
+
                 mk = _month_key()
                 # normaliza NULLs antigos
                 cur.execute("UPDATE clients SET usage_month=%s WHERE usage_month IS NULL OR usage_month='';", (mk,))
@@ -688,7 +698,63 @@ def pricing():
         "checkout_enabled": bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON),
         "ts": _iso(_now_utc()),
     })
+    
 
+@app.route('/signup', methods=['POST'])
+def signup():
+    """Cria um workspace TRIAL e retorna {client_id, api_key}."""
+    _ensure_schema_once()
+    data = request.get_json(silent=True) or request.form or {}
+    nome = (data.get('nome') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    empresa = (data.get('empresa') or '').strip()
+    telefone = (data.get('telefone') or '').strip()
+
+    if not email or '@' not in email:
+        return _json_err("Email válido é obrigatório", 400)
+
+    # gera client_id "legível" + sufixo rand
+    base_id = (empresa or email.split('@', 1)[0] or 'trial').strip().lower()
+    base_id = ''.join(ch if ch.isalnum() else '-' for ch in base_id)
+    base_id = re.sub(r'-+', '-', base_id).strip('-')[:24] or "trial"
+    client_id = f"{base_id}-{secrets.token_hex(3)}"  # ex: minha-empresa-a1b2c3
+
+    api_key = _gen_api_key(client_id)
+    trial_ends_at = _now_utc() + timedelta(days=14)
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # bloqueia email duplicado
+                cur.execute("SELECT client_id FROM clients WHERE email=%s LIMIT 1", (email,))
+                row = cur.fetchone()
+                if row:
+                    return _json_err("Este email já está cadastrado", 409)
+
+                mk = _month_key()
+                cur.execute(
+                    """
+                    INSERT INTO clients
+                      (client_id, api_key, plan, status, usage_month, leads_used_month,
+                       nome, email, empresa, telefone, trial_ends_at, created_at, updated_at)
+                    VALUES
+                      (%s, %s, 'trial', 'active', %s, 0,
+                       %s, %s, %s, %s, %s, NOW(), NOW())
+                    """,
+                    (client_id, api_key, mk, nome or None, email, empresa or None, telefone or None, trial_ends_at)
+                )
+
+        return _json_ok({
+            "success": True,
+            "client_id": client_id,
+            "api_key": api_key,
+            "plan": "trial",
+            "trial_ends_at": _iso(trial_ends_at),
+            "lead_limit_month": PLAN_CATALOG["trial"]["lead_limit_month"],
+        })
+    finally:
+        conn.close()
 @app.post("/criar_cliente")
 def criar_cliente():
     data = request.get_json(silent=True) or {}

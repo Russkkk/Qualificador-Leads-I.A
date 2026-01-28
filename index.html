@@ -42,6 +42,7 @@
   .ok { color: #bbf7d0; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.28); padding: 10px 12px; border-radius: 12px; }
 </style>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -80,6 +81,7 @@
       </div>
       <div style="height:12px"></div>
       <div id="dashError"></div>
+      <div id="dashViz" style="display:grid; gap:12px; margin-bottom:12px;"></div>
       <pre id="dashRaw" class="card" style="white-space:pre-wrap; overflow:auto;"></pre>
     </div>
   </div>
@@ -240,28 +242,86 @@
       return top ? top[0] : "—";
     }
 
-    async function loadDashboard(){
-      const err = document.getElementById("dashError");
-      const raw = document.getElementById("dashRaw");
-      err.innerHTML = "";
-      raw.textContent = "";
-      try {
-        const data = await window.__leadrank.api("/dashboard_data", { method: "GET" });
-        raw.textContent = JSON.stringify(data, null, 2);
+    
+async function loadDashboard(){
+  const err = document.getElementById("dashError");
+  const raw = document.getElementById("dashRaw");
+  const viz = document.getElementById("dashViz");
+  err.innerHTML = "";
+  raw.textContent = "";
+  viz.innerHTML = "";
+  try {
+    const data = await window.__lr.lrApi("/dashboard_data", { method: "GET" });
+    raw.textContent = JSON.stringify(data, null, 2);
 
-        // Tenta preencher KPIs com alguns nomes comuns; se sua API tiver nomes diferentes, ainda mostra o JSON completo.
-        document.getElementById("kpiLeads").textContent = safeStr(data.total_leads || data.total || data.leads_total || "—");
-        const a = (data.abc && (data.abc.A ?? data.abc.a)) ?? data.A ?? "—";
-        const b = (data.abc && (data.abc.B ?? data.abc.b)) ?? data.B ?? "—";
-        const c = (data.abc && (data.abc.C ?? data.abc.c)) ?? data.C ?? "—";
-        document.getElementById("kpiABC").textContent = `${a} / ${b} / ${c}`;
-        document.getElementById("kpiOrigem").textContent = pickTop(data.origens || data.origins || data.by_origem);
-      } catch(e) {
-        err.innerHTML = '<div class="error"><b>Erro:</b> ' + String(e.message || e) + '</div>';
-      }
+    // KPIs
+    document.getElementById("kpiLeads").textContent = safeStr(data.total_leads || data.total || data.leads_total || "—");
+    const a = (data.abc && (data.abc.A ?? data.abc.a)) ?? data.A ?? "—";
+    const b = (data.abc && (data.abc.B ?? data.abc.b)) ?? data.B ?? "—";
+    const c = (data.abc && (data.abc.C ?? data.abc.c)) ?? data.C ?? "—";
+    document.getElementById("kpiABC").textContent = `${a} / ${b} / ${c}`;
+    document.getElementById("kpiOrigem").textContent = pickTop(data.origens || data.origins || data.by_origem);
+
+    // ===== Chart: leads por dia (se backend enviar série) =====
+    const series = data.leads_by_day || data.by_day || null;
+    if (series && typeof series === "object") {
+      const labels = Object.keys(series);
+      const values = labels.map(k => Number(series[k]) || 0);
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = '<h2>Leads por dia</h2><canvas id="leadsChart" height="120"></canvas>';
+      viz.appendChild(card);
+      const ctx = document.getElementById("leadsChart").getContext("2d");
+      new Chart(ctx, { type: "line", data: { labels, datasets: [{ label: "Leads", data: values }] }, options: { responsive: true }});
     }
 
-    window.addEventListener("DOMContentLoaded", () => {
+    // ===== Table: últimos leads =====
+    const leads = data.recent_leads || data.leads || data.rows || [];
+    if (Array.isArray(leads) && leads.length) {
+      const tcard = document.createElement("div");
+      tcard.className = "card";
+      const rows = leads.slice(0, 20).map(r => {
+        const score = (r.score ?? Math.round((Number(r.probabilidade)||0)*100));
+        const origem = r.origem || "—";
+        const nome = r.nome || "—";
+        const tel = r.telefone || "—";
+        const created = r.created_at ? String(r.created_at).replace("T"," ").slice(0,19) : "—";
+        const status = (r.virou_cliente === 1 || r.virou_cliente === 1.0) ? "Convertido" : (r.virou_cliente === 0 || r.virou_cliente === 0.0) ? "Negado" : "Pendente";
+        return `<tr>
+          <td>${created}</td>
+          <td>${nome}</td>
+          <td>${tel}</td>
+          <td>${origem}</td>
+          <td style="text-align:right;">${safeStr(score)}</td>
+          <td>${status}</td>
+        </tr>`;
+      }).join("");
+      tcard.innerHTML = `
+        <h2>Últimos leads</h2>
+        <div style="overflow:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+              <tr style="text-align:left; opacity:.85;">
+                <th style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.12);">Data</th>
+                <th style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.12);">Nome</th>
+                <th style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.12);">Telefone</th>
+                <th style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.12);">Origem</th>
+                <th style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.12); text-align:right;">Score</th>
+                <th style="padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.12);">Status</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+      viz.appendChild(tcard);
+    }
+  } catch(e) {
+    err.innerHTML = '<div class="error"><b>Erro:</b> ' + String(e.message || e) + '</div>';
+  }
+}
+
+window.addEventListener("DOMContentLoaded", () => {window.addEventListener("DOMContentLoaded", () => {
       document.getElementById("refreshBtn").addEventListener("click", loadDashboard);
       loadDashboard();
     });
