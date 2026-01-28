@@ -333,14 +333,12 @@ def _ensure_schema():
                 mk = _month_key()
                 # normaliza NULLs antigos
                 cur.execute("UPDATE clients SET usage_month=%s WHERE usage_month IS NULL OR usage_month='';", (mk,))
-                cur.execute("UPDATE clients SET api_key='' WHERE api_key IS NULL;")
+                cur.execute("UPDATE clients SET api_key=NULL WHERE api_key='' OR api_key IS NULL;")
                 cur.execute("UPDATE clients SET updated_at=NOW() WHERE updated_at IS NULL;")
 
-                # normaliza api_key antiga (evita conflito com índice único)
-cur.execute("UPDATE clients SET api_key=NULL WHERE api_key='' OR api_key IS NULL;")
-# garante que o índice de api_key seja o correto (em versões antigas podia ser UNIQUE sem filtro)
-cur.execute("DROP INDEX IF EXISTS idx_clients_api_key;")
-cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL AND api_key <> '';")
+                # PATCH: evita colisão de api_key vazia em clientes trial
+                cur.execute("DROP INDEX IF EXISTS idx_clients_api_key;")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL AND api_key <> ''; ")
 
                 # -------------------------
                 # THRESHOLDS / MODEL_META (para insights/treino)
@@ -409,11 +407,6 @@ def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
                     cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
                     row = cur.fetchone() or row
 
-                # garante api_key não nulo (evita NotNullViolation em bancos antigos)
-                if row.get("api_key") is None:
-                    cur.execute("UPDATE clients SET api_key='' WHERE client_id=%s", (client_id,))
-                    cur.execute("SELECT * FROM clients WHERE client_id=%s", (client_id,))
-                    row = cur.fetchone() or row
 
         return dict(row)
     finally:
