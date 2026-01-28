@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-
+import psycopg
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
