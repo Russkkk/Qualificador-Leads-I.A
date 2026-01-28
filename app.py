@@ -43,6 +43,17 @@ except Exception:
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DEMO_KEY = os.environ.get("DEMO_KEY", "").strip()
 
+# ===== Stripe config (GLOBAL) =====
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+STRIPE_PRICE_IDS_JSON = os.environ.get("STRIPE_PRICE_IDS_JSON", "").strip()
+BILLING_WEBHOOK_SECRET = os.environ.get("BILLING_WEBHOOK_SECRET", "").strip()
+
+try:
+    STRIPE_PRICE_IDS = json.loads(STRIPE_PRICE_IDS_JSON) if STRIPE_PRICE_IDS_JSON else {}
+except Exception:
+    STRIPE_PRICE_IDS = {}
+
+
 # ajuste aqui seus domínios permitidos no CORS
 ALLOWED_ORIGINS = [
     "https://qualificador-leads-ia.onrender.com",   # Static Site
@@ -367,7 +378,8 @@ def _ensure_schema():
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS telefone TEXT;")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;")
 
-# índices/uniques (email pode ser NULL em workspaces antigos)
+
+                # índices/uniques (email pode ser NULL em workspaces antigos)
                 cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
 
                 mk = _month_key()
@@ -695,7 +707,7 @@ def pricing():
     return _json_ok({
         "plans": PLAN_CATALOG,
         "currency": "BRL",
-        "checkout_enabled": bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON),
+        "checkout_enabled": bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS),
         "ts": _iso(_now_utc()),
     })
     
@@ -1474,8 +1486,13 @@ def seed_demo():
 # Premium / Billing helpers
 # =========================
 def _stripe_price_id(plan: str) -> Optional[str]:
-    if not STRIPE_PRICE_IDS_JSON:
+    # Mantido por compatibilidade: preferir STRIPE_PRICE_IDS (dict já parseado)
+    try:
+        pid = (STRIPE_PRICE_IDS.get(plan) or "").strip()
+        return pid or None
+    except Exception:
         return None
+
     try:
         mp = json.loads(STRIPE_PRICE_IDS_JSON)
         return (mp.get(plan) or "").strip() or None
@@ -1580,8 +1597,8 @@ def billing_status():
 def billing_checkout():
     """
     Cria uma sessão de checkout (Stripe) se configurado.
-    Caso não configurado, retorna ok=false com fallback="whatsapp".
     Requer X-API-KEY do workspace.
+    Body: { client_id, plan, success_url?, cancel_url? }
     """
     data = request.get_json(silent=True) or {}
     client_id = (data.get("client_id") or "").strip()
@@ -1598,34 +1615,41 @@ def billing_checkout():
     if not ok_auth:
         return _json_err(msg, 403, code="auth_required")
 
-    if not (STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON):
-        return _json_err("Checkout ainda não configurado. Use WhatsApp para ativar.", 501, fallback="whatsapp")
+    if not (STRIPE_SECRET_KEY and STRIPE_PRICE_IDS):
+        return _json_err("Checkout ainda não configurado. Configure STRIPE_SECRET_KEY e STRIPE_PRICE_IDS_JSON.", 501)
 
-    price_id = _stripe_price_id(plan)
+    price_id = (STRIPE_PRICE_IDS.get(plan) or "").strip()
     if not price_id:
         return _json_err("Price ID do Stripe não encontrado para este plano.", 500)
 
     # cria sessão via API REST (sem lib stripe)
     import requests
-    url = "https://api.stripe.com/v1/checkout/sessions"
-    headers = {"Authorization": f"Bearer {STRIPE_SECRET_KEY}"}
-    payload = {
-        "mode": "subscription",
-        "line_items[0][price]": price_id,
-        "line_items[0][quantity]": "1",
-        "success_url": success_url or "https://qualificador-leads-ia.onrender.com/?checkout=success",
-        "cancel_url": cancel_url or "https://qualificador-leads-ia.onrender.com/?checkout=cancel",
-        "client_reference_id": client_id,
-        "metadata[client_id]": client_id,
-        "metadata[plan]": plan,
-    }
-    r = requests.post(url, headers=headers, data=payload, timeout=20)
+    r = requests.post(
+        "https://api.stripe.com/v1/checkout/sessions",
+        headers={"Authorization": f"Bearer {STRIPE_SECRET_KEY}"},
+        data={
+            "mode": "subscription",
+            "line_items[0][price]": price_id,
+            "line_items[0][quantity]": "1",
+            "success_url": success_url or "https://qualificador-leads-ia.onrender.com/?checkout=success",
+            "cancel_url": cancel_url or "https://qualificador-leads-ia.onrender.com/?checkout=cancel",
+            "client_reference_id": client_id,
+            "metadata[client_id]": client_id,
+            "metadata[plan]": plan,
+        },
+        timeout=20,
+    )
+
     if r.status_code >= 400:
-        return _json_err("Falha ao criar checkout no Stripe.", 502, stripe_status=r.status_code, stripe_body=r.text[:500])
+        return _json_err(
+            "Falha ao criar checkout no Stripe.",
+            502,
+            stripe_status=r.status_code,
+            stripe_body=r.text[:500],
+        )
 
     j = r.json()
     return _json_ok({"checkout_url": j.get("url"), "session_id": j.get("id"), "provider": "stripe"})
-
 
 @app.post("/billing/webhook")
 def billing_webhook():
