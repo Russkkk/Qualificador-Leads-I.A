@@ -1,0 +1,9 @@
+flask==3.0.3
+flask-cors==4.0.1
+pandas
+scikit-learn==1.5.1
+gunicorn
+numpy==2.0.1
+werkzeug
+psycopg2-binary==2.9.9
+requests==2.32.3
