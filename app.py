@@ -336,7 +336,11 @@ def _ensure_schema():
                 cur.execute("UPDATE clients SET api_key='' WHERE api_key IS NULL;")
                 cur.execute("UPDATE clients SET updated_at=NOW() WHERE updated_at IS NULL;")
 
-                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key <> '';")
+                # normaliza api_key antiga (evita conflito com índice único)
+cur.execute("UPDATE clients SET api_key=NULL WHERE api_key='' OR api_key IS NULL;")
+# garante que o índice de api_key seja o correto (em versões antigas podia ser UNIQUE sem filtro)
+cur.execute("DROP INDEX IF EXISTS idx_clients_api_key;")
+cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key IS NOT NULL AND api_key <> '';")
 
                 # -------------------------
                 # THRESHOLDS / MODEL_META (para insights/treino)
@@ -389,7 +393,7 @@ def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
                 # cria se não existir
                 cur.execute("""
                     INSERT INTO clients (client_id, api_key, plan, status, usage_month, leads_used_month, updated_at)
-                    VALUES (%s, '', %s, 'active', %s, 0, NOW())
+                    VALUES (%s, NULL, %s, 'active', %s, 0, NOW())
                     ON CONFLICT (client_id) DO NOTHING
                 """, (client_id, plan, mk))
 
@@ -808,9 +812,7 @@ def prever():
     email = (data.get("email_lead") or data.get("email") or lead.get("email_lead") or lead.get("email") or "").strip()
     telefone = (data.get("telefone") or lead.get("telefone") or "").strip()
 
-    origem = (data.get("origem") or lead.get("origem") or lead.get("source") or "").strip().lower()
-    if not origem:
-        origem = "desconhecida"
+    origem = (data.get("origem") or lead.get("origem") or lead.get("source") or "").strip()
 
     tempo_site = _safe_int(data.get("tempo_site") if "tempo_site" in data else lead.get("tempo_site"), 0)
     paginas_visitadas = _safe_int(data.get("paginas_visitadas") if "paginas_visitadas" in data else lead.get("paginas_visitadas"), 0)
@@ -837,7 +839,8 @@ def prever():
     payload.setdefault("email", email)
     payload.setdefault("email_lead", email)
     payload.setdefault("telefone", telefone)
-    payload.setdefault("origem", origem)
+    if origem:
+        payload.setdefault("origem", origem)
     payload.setdefault("tempo_site", tempo_site)
     payload.setdefault("paginas_visitadas", paginas_visitadas)
     payload.setdefault("clicou_preco", clicou_preco)
