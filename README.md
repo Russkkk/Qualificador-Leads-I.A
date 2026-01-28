@@ -1,1 +1,0 @@
-# Qualificador-Leads-I.A
