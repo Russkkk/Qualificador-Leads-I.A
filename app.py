@@ -11,7 +11,6 @@
 
 import os
 import json
-import re
 import time
 import random
 import string
@@ -43,19 +42,9 @@ except Exception:
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DEMO_KEY = os.environ.get("DEMO_KEY", "").strip()
 
-# ===== Stripe config (GLOBAL) =====
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
-STRIPE_PRICE_IDS_JSON = os.environ.get("STRIPE_PRICE_IDS_JSON", "").strip()
-BILLING_WEBHOOK_SECRET = os.environ.get("BILLING_WEBHOOK_SECRET", "").strip()
-
-try:
-    STRIPE_PRICE_IDS = json.loads(STRIPE_PRICE_IDS_JSON) if STRIPE_PRICE_IDS_JSON else {}
-except Exception:
-    STRIPE_PRICE_IDS = {}
-
-
 # ajuste aqui seus domínios permitidos no CORS
 ALLOWED_ORIGINS = [
+    "null",  # permite testar abrindo HTML via file://
     "https://qualificador-leads-ia.onrender.com",   # Static Site
     "https://qualificador-leads-i-a.onrender.com",  # Web Service (se chamar a si mesmo)
     "http://localhost:8000",
@@ -371,16 +360,6 @@ def _ensure_schema():
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS leads_used_month INTEGER NOT NULL DEFAULT 0;")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();")
-
-                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nome TEXT;")
-                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;")
-                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS empresa TEXT;")
-                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS telefone TEXT;")
-                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;")
-
-
-                # índices/uniques (email pode ser NULL em workspaces antigos)
-                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
 
                 mk = _month_key()
                 # normaliza NULLs antigos
@@ -707,66 +686,56 @@ def pricing():
     return _json_ok({
         "plans": PLAN_CATALOG,
         "currency": "BRL",
-        "checkout_enabled": bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS),
+        "checkout_enabled": bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON),
         "ts": _iso(_now_utc()),
     })
     
-
 @app.route('/signup', methods=['POST'])
 def signup():
-    """Cria um workspace TRIAL e retorna {client_id, api_key}."""
-    _ensure_schema_once()
-    data = request.get_json(silent=True) or request.form or {}
-    nome = (data.get('nome') or '').strip()
-    email = (data.get('email') or '').strip().lower()
-    empresa = (data.get('empresa') or '').strip()
-    telefone = (data.get('telefone') or '').strip()
+    data = request.json or request.form
+    nome = data.get('nome', '').strip()
+    email = data.get('email', '').strip().lower()
+    empresa = data.get('empresa', '').strip()
 
     if not email or '@' not in email:
-        return _json_err("Email válido é obrigatório", 400)
-
-    # gera client_id "legível" + sufixo rand
-    base_id = (empresa or email.split('@', 1)[0] or 'trial').strip().lower()
-    base_id = ''.join(ch if ch.isalnum() else '-' for ch in base_id)
-    base_id = re.sub(r'-+', '-', base_id).strip('-')[:24] or "trial"
-    client_id = f"{base_id}-{secrets.token_hex(3)}"  # ex: minha-empresa-a1b2c3
-
-    api_key = _gen_api_key(client_id)
-    trial_ends_at = _now_utc() + timedelta(days=14)
+        return jsonify({"error": "Email válido é obrigatório"}), 400
 
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # bloqueia email duplicado
-                cur.execute("SELECT client_id FROM clients WHERE email=%s LIMIT 1", (email,))
-                row = cur.fetchone()
-                if row:
-                    return _json_err("Este email já está cadastrado", 409)
+            cur = conn.cursor()
+            # Verifica se email já existe
+            cur.execute("SELECT id FROM clients WHERE email = %s", (email,))
+            if cur.fetchone():
+                return jsonify({"error": "Este email já está cadastrado"}), 409
 
-                mk = _month_key()
-                cur.execute(
-                    """
-                    INSERT INTO clients
-                      (client_id, api_key, plan, status, usage_month, leads_used_month,
-                       nome, email, empresa, telefone, trial_ends_at, created_at, updated_at)
-                    VALUES
-                      (%s, %s, 'trial', 'active', %s, 0,
-                       %s, %s, %s, %s, %s, NOW(), NOW())
-                    """,
-                    (client_id, api_key, mk, nome or None, email, empresa or None, telefone or None, trial_ends_at)
-                )
+            api_key = secrets.token_urlsafe(32)
+            client_id = f"trial-{secrets.token_hex(8)}"  # ou uuid
 
-        return _json_ok({
+            cur.execute("""
+                INSERT INTO clients (
+                    id, nome, email, empresa, api_key, plano, lead_limit_month,
+                    created_at, valid_until
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+            """, (
+                client_id, nome, email, empresa, api_key, 'trial', 100,
+                datetime.utcnow() + timedelta(days=14)
+            ))
+
+        # Aqui você pode adicionar envio de email (implemente depois)
+        # send_welcome_email(email, api_key, client_id)
+
+        return jsonify({
             "success": True,
             "client_id": client_id,
             "api_key": api_key,
-            "plan": "trial",
-            "trial_ends_at": _iso(trial_ends_at),
-            "lead_limit_month": PLAN_CATALOG["trial"]["lead_limit_month"],
+            "message": "Conta trial criada! Verifique seu email."
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
+
 @app.post("/criar_cliente")
 def criar_cliente():
     data = request.get_json(silent=True) or {}
@@ -1486,13 +1455,8 @@ def seed_demo():
 # Premium / Billing helpers
 # =========================
 def _stripe_price_id(plan: str) -> Optional[str]:
-    # Mantido por compatibilidade: preferir STRIPE_PRICE_IDS (dict já parseado)
-    try:
-        pid = (STRIPE_PRICE_IDS.get(plan) or "").strip()
-        return pid or None
-    except Exception:
+    if not STRIPE_PRICE_IDS_JSON:
         return None
-
     try:
         mp = json.loads(STRIPE_PRICE_IDS_JSON)
         return (mp.get(plan) or "").strip() or None
@@ -1597,8 +1561,8 @@ def billing_status():
 def billing_checkout():
     """
     Cria uma sessão de checkout (Stripe) se configurado.
+    Caso não configurado, retorna ok=false com fallback="whatsapp".
     Requer X-API-KEY do workspace.
-    Body: { client_id, plan, success_url?, cancel_url? }
     """
     data = request.get_json(silent=True) or {}
     client_id = (data.get("client_id") or "").strip()
@@ -1615,41 +1579,34 @@ def billing_checkout():
     if not ok_auth:
         return _json_err(msg, 403, code="auth_required")
 
-    if not (STRIPE_SECRET_KEY and STRIPE_PRICE_IDS):
-        return _json_err("Checkout ainda não configurado. Configure STRIPE_SECRET_KEY e STRIPE_PRICE_IDS_JSON.", 501)
+    if not (STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON):
+        return _json_err("Checkout ainda não configurado. Use WhatsApp para ativar.", 501, fallback="whatsapp")
 
-    price_id = (STRIPE_PRICE_IDS.get(plan) or "").strip()
+    price_id = _stripe_price_id(plan)
     if not price_id:
         return _json_err("Price ID do Stripe não encontrado para este plano.", 500)
 
     # cria sessão via API REST (sem lib stripe)
     import requests
-    r = requests.post(
-        "https://api.stripe.com/v1/checkout/sessions",
-        headers={"Authorization": f"Bearer {STRIPE_SECRET_KEY}"},
-        data={
-            "mode": "subscription",
-            "line_items[0][price]": price_id,
-            "line_items[0][quantity]": "1",
-            "success_url": success_url or "https://qualificador-leads-ia.onrender.com/?checkout=success",
-            "cancel_url": cancel_url or "https://qualificador-leads-ia.onrender.com/?checkout=cancel",
-            "client_reference_id": client_id,
-            "metadata[client_id]": client_id,
-            "metadata[plan]": plan,
-        },
-        timeout=20,
-    )
-
+    url = "https://api.stripe.com/v1/checkout/sessions"
+    headers = {"Authorization": f"Bearer {STRIPE_SECRET_KEY}"}
+    payload = {
+        "mode": "subscription",
+        "line_items[0][price]": price_id,
+        "line_items[0][quantity]": "1",
+        "success_url": success_url or "https://qualificador-leads-ia.onrender.com/?checkout=success",
+        "cancel_url": cancel_url or "https://qualificador-leads-ia.onrender.com/?checkout=cancel",
+        "client_reference_id": client_id,
+        "metadata[client_id]": client_id,
+        "metadata[plan]": plan,
+    }
+    r = requests.post(url, headers=headers, data=payload, timeout=20)
     if r.status_code >= 400:
-        return _json_err(
-            "Falha ao criar checkout no Stripe.",
-            502,
-            stripe_status=r.status_code,
-            stripe_body=r.text[:500],
-        )
+        return _json_err("Falha ao criar checkout no Stripe.", 502, stripe_status=r.status_code, stripe_body=r.text[:500])
 
     j = r.json()
     return _json_ok({"checkout_url": j.get("url"), "session_id": j.get("id"), "provider": "stripe"})
+
 
 @app.post("/billing/webhook")
 def billing_webhook():
