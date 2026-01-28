@@ -6,8 +6,4 @@ gunicorn
 numpy
 werkzeug
 psycopg2-binary
-<<<<<<< HEAD
 requests
-
-=======
->>>>>>> 38dcfb269bbb79235801ec1a0499da93cb46697e
