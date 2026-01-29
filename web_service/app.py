@@ -6,7 +6,7 @@
 # - Endpoints de dashboard/insights/treino (LogReg opcional)
 # - Export CSV server-side
 #
-# Requisitos: psycopg2-binary, flask, flask-cors
+# Requisitos: psycopg[binary], flask, flask-cors
 # (Opcional): numpy + scikit-learn para /recalc_pending e /auto_threshold
 
 import os
@@ -21,10 +21,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-import psycopg
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
+import psycopg
+from psycopg.rows import dict_row
 # optional ML deps (se não existirem, rotas de treino respondem com erro amigável)
 try:
     import numpy as np
@@ -41,6 +40,11 @@ except Exception:
 # =========================
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DEMO_KEY = os.environ.get("DEMO_KEY", "").strip()
+
+# Billing / Premium (opcional)
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+STRIPE_PRICE_IDS_JSON = os.environ.get("STRIPE_PRICE_IDS_JSON", "").strip()
+BILLING_WEBHOOK_SECRET = os.environ.get("BILLING_WEBHOOK_SECRET", "").strip()
 
 # ajuste aqui seus domínios permitidos no CORS
 ALLOWED_ORIGINS = [
@@ -114,7 +118,7 @@ def _top_origens(client_id: str, days: int = 30, limit: int = 6):
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT COALESCE(NULLIF(TRIM(origem), ''), 'desconhecida') AS origem,
@@ -138,7 +142,7 @@ def _hot_leads_today(client_id: str, limit: int = 20):
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT id, nome, telefone, email_lead, origem,
@@ -193,7 +197,9 @@ def _require_env_db():
 
 def _db():
     _require_env_db()
-    return psycopg2.connect(DATABASE_URL)
+    # psycopg v3 (compatível com Python 3.13 no Render)
+    # row_factory=dict_row faz fetchone/fetchall retornarem dicts (similar ao dict_row)
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -337,9 +343,16 @@ def _ensure_schema():
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS clients (
                         client_id TEXT PRIMARY KEY,
+                        -- perfil (opcional, usado no /signup)
+                        nome TEXT,
+                        email TEXT,
+                        empresa TEXT,
+                        valid_until TIMESTAMPTZ,
+                        -- auth / plan
                         api_key TEXT,
                         plan TEXT NOT NULL DEFAULT 'trial',
                         status TEXT NOT NULL DEFAULT 'active',
+                        -- uso mensal
                         usage_month TEXT NOT NULL DEFAULT '',
                         leads_used_month INTEGER NOT NULL DEFAULT 0,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -348,6 +361,11 @@ def _ensure_schema():
                 """)
 
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_key TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nome TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS empresa TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS valid_until TIMESTAMPTZ;")
+
                 # bancos antigos podem ter api_key NOT NULL -> drop
                 try:
                     cur.execute("ALTER TABLE clients ALTER COLUMN api_key DROP NOT NULL;")
@@ -368,6 +386,7 @@ def _ensure_schema():
                 cur.execute("UPDATE clients SET updated_at=NOW() WHERE updated_at IS NULL;")
 
                 cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key <> '';")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
 
                 # -------------------------
                 # THRESHOLDS / MODEL_META (para insights/treino)
@@ -388,6 +407,33 @@ def _ensure_schema():
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
                 """)
+                # -------------------------
+                # SUBSCRIPTIONS / BILLING EVENTS (Premium/Billing)
+                # -------------------------
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS subscriptions (
+                        client_id TEXT PRIMARY KEY,
+                        provider TEXT NOT NULL DEFAULT 'manual',
+                        status TEXT NOT NULL DEFAULT 'inactive',
+                        plan TEXT NOT NULL DEFAULT 'trial',
+                        current_period_start TIMESTAMPTZ,
+                        current_period_end TIMESTAMPTZ,
+                        cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS billing_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        provider TEXT NOT NULL DEFAULT 'manual',
+                        event_type TEXT NOT NULL,
+                        client_id TEXT,
+                        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_billing_events_client_created ON billing_events(client_id, created_at DESC);")
+
 
     finally:
         conn.close()
@@ -416,7 +462,7 @@ def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 # cria se não existir
                 cur.execute("""
                     INSERT INTO clients (client_id, api_key, plan, status, usage_month, leads_used_month, updated_at)
@@ -469,7 +515,7 @@ def _require_client_auth(client_id: str) -> Tuple[bool, Dict[str, Any], str]:
 
 
 def _check_quota_and_bump(client_id: str, client_row: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
-    """Valida limite do plano e incrementa leads_used_month (chamar após inserir lead)."""
+    """Valida limite do plan e incrementa leads_used_month (chamar após inserir lead)."""
     plan = (client_row.get("plan") or "trial").strip().lower()
     meta = PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"])
     used = int(client_row.get("leads_used_month") or 0)
@@ -506,7 +552,7 @@ def _get_threshold(client_id: str) -> float:
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("SELECT threshold FROM thresholds WHERE client_id=%s", (client_id,))
                 row = cur.fetchone()
                 if row and row.get("threshold") is not None:
@@ -542,7 +588,7 @@ def _fetch_recent_leads(client_id: str, limit: int = DEFAULT_LIMIT) -> List[Dict
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT id, client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
@@ -581,7 +627,7 @@ def _get_labeled_rows(client_id: str) -> List[Dict[str, Any]]:
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT id, tempo_site, paginas_visitadas, clicou_preco, probabilidade, virou_cliente
@@ -682,7 +728,7 @@ def health_db():
 
 @app.get("/pricing")
 def pricing():
-    """Retorna o catálogo de planos (para UI)."""
+    """Retorna o catálogo de plans (para UI)."""
     return _json_ok({
         "plans": PLAN_CATALOG,
         "currency": "BRL",
@@ -692,47 +738,57 @@ def pricing():
     
 @app.route('/signup', methods=['POST'])
 def signup():
-    data = request.json or request.form
-    nome = data.get('nome', '').strip()
-    email = data.get('email', '').strip().lower()
-    empresa = data.get('empresa', '').strip()
+    """
+    Cria workspace trial a partir de nome/email/empresa.
+    Importante: esta implementação é compatível com o schema atual (clients.client_id como PK).
+    """
+    data = request.get_json(silent=True) or request.form or {}
+    nome = (data.get('nome') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    empresa = (data.get('empresa') or '').strip()
 
     if not email or '@' not in email:
-        return jsonify({"error": "Email válido é obrigatório"}), 400
+        return jsonify({"ok": False, "error": "Email válido é obrigatório"}), 400
 
+    _ensure_schema_once()
     conn = _db()
     try:
         with conn:
-            cur = conn.cursor()
-            # Verifica se email já existe
-            cur.execute("SELECT id FROM clients WHERE email = %s", (email,))
-            if cur.fetchone():
-                return jsonify({"error": "Este email já está cadastrado"}), 409
+            with conn.cursor() as cur:
+                # email já cadastrado?
+                cur.execute("SELECT client_id, api_key, valid_until FROM clients WHERE email = %s", (email,))
+                existing = cur.fetchone()
+                if existing:
+                    return jsonify({
+                        "ok": False,
+                        "error": "Este email já está cadastrado",
+                        "client_id": existing.get("client_id"),
+                        "valid_until": _iso(existing.get("valid_until")),
+                    }), 409
 
-            api_key = secrets.token_urlsafe(32)
-            client_id = f"trial-{secrets.token_hex(8)}"  # ou uuid
+                api_key = _gen_api_key("trial")
+                client_id = f"trial-{secrets.token_hex(8)}"
+                mk = _month_key()
+                valid_until = _now_utc() + timedelta(days=14)
 
-            cur.execute("""
-                INSERT INTO clients (
-                    id, nome, email, empresa, api_key, plano, lead_limit_month,
-                    created_at, valid_until
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s)
-            """, (
-                client_id, nome, email, empresa, api_key, 'trial', 100,
-                datetime.utcnow() + timedelta(days=14)
-            ))
-
-        # Aqui você pode adicionar envio de email (implemente depois)
-        # send_welcome_email(email, api_key, client_id)
+                cur.execute("""
+                    INSERT INTO clients (
+                        client_id, nome, email, empresa,
+                        api_key, plan, status, usage_month, leads_used_month,
+                        valid_until, created_at, updated_at
+                    ) VALUES (%s,%s,%s,%s,%s,'trial','active',%s,0,%s,NOW(),NOW())
+                """, (client_id, nome, email, empresa, api_key, mk, valid_until))
 
         return jsonify({
-            "success": True,
+            "ok": True,
             "client_id": client_id,
             "api_key": api_key,
-            "message": "Conta trial criada! Verifique seu email."
-        })
+            "plan": "trial",
+            "valid_until": _iso(valid_until),
+            "message": "Conta trial criada! Salve sua API key.",
+        }), 201
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)}), 500
     finally:
         conn.close()
 
@@ -757,7 +813,7 @@ def criar_cliente():
         conn = _db()
         try:
             with conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(
                         "UPDATE clients SET api_key=%s, plan=%s, updated_at=NOW() WHERE client_id=%s",
                         (api_key, plan, client_id),
@@ -804,7 +860,7 @@ def client_meta():
 
 @app.post("/set_plan")
 def set_plan():
-    """Admin: ajusta plano/status de um client_id. Protegido por DEMO_KEY."""
+    """Admin: ajusta plan/status de um client_id. Protegido por DEMO_KEY."""
     ok, err = _require_demo_key()
     if not ok:
         return _json_err("Unauthorized (DEMO_KEY)", 403, reason=err)
@@ -826,7 +882,7 @@ def set_plan():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 sets = []
                 vals = []
                 if plan:
@@ -922,7 +978,7 @@ def prever():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     INSERT INTO leads
@@ -951,7 +1007,7 @@ def prever():
             "plan": plan,
             "created_at": _iso(row.get("created_at")),
         })
-    except (psycopg2.errors.UndefinedColumn, psycopg2.errors.NotNullViolation):
+    except (psycopg.errors.UndefinedColumn, psycopg.errors.NotNullViolation):
         # segurança extra: se banco estiver em versão antiga, migra e tenta de novo
         _ensure_schema()
         return prever()
@@ -1057,7 +1113,7 @@ def metrics():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("SELECT COUNT(*) AS total FROM leads;")
                 total = int(cur.fetchone()["total"])
                 cur.execute("SELECT COUNT(*) AS labeled FROM leads WHERE virou_cliente IS NOT NULL;")
@@ -1098,7 +1154,7 @@ def recalc_pending():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT id, tempo_site, paginas_visitadas, clicou_preco
@@ -1196,7 +1252,7 @@ def insights():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT probabilidade, virou_cliente, created_at
@@ -1283,7 +1339,7 @@ def leads_export_csv():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     """
                     SELECT id, nome, email_lead, telefone, probabilidade, virou_cliente,
@@ -1475,7 +1531,7 @@ def _upsert_subscription(client_id: str, plan: str, status: str, provider: str =
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
                     INSERT INTO subscriptions (client_id, provider, status, plan, current_period_start, current_period_end, cancel_at_period_end, updated_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
@@ -1489,7 +1545,7 @@ def _upsert_subscription(client_id: str, plan: str, status: str, provider: str =
                       updated_at=NOW()
                 """, (client_id, provider, status, plan, period_start, period_end, cancel_at_period_end))
 
-                # política de ativação: subscription active -> client ativo e plano pago
+                # política de ativação: subscription active -> client ativo e plan pago
                 if status == "active":
                     cur.execute("UPDATE clients SET plan=%s, status='active', updated_at=NOW() WHERE client_id=%s", (plan, client_id))
                 elif status in ("past_due", "canceled", "inactive"):
@@ -1511,7 +1567,7 @@ def admin_reset_month():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 # reseta apenas workspaces que ainda estão no mês anterior
                 cur.execute("""
                     UPDATE clients
@@ -1538,7 +1594,7 @@ def billing_status():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("SELECT * FROM subscriptions WHERE client_id=%s", (client_id,))
                 sub = cur.fetchone()
         enabled = bool(STRIPE_SECRET_KEY and STRIPE_PRICE_IDS_JSON)
@@ -1584,7 +1640,7 @@ def billing_checkout():
 
     price_id = _stripe_price_id(plan)
     if not price_id:
-        return _json_err("Price ID do Stripe não encontrado para este plano.", 500)
+        return _json_err("Price ID do Stripe não encontrado para este plan.", 500)
 
     # cria sessão via API REST (sem lib stripe)
     import requests
@@ -1630,7 +1686,7 @@ def billing_webhook():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
                     INSERT INTO billing_events (provider, event_type, client_id, payload)
                     VALUES (%s,%s,%s,%s::jsonb)
@@ -1667,7 +1723,7 @@ def funnels():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
                     SELECT
                       COUNT(*) AS total,
@@ -1714,7 +1770,7 @@ def lead_explain():
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("SELECT * FROM leads WHERE client_id=%s AND id=%s", (client_id, lead_id))
                 lead = cur.fetchone()
         if not lead:
