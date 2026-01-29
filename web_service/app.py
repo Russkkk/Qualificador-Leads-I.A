@@ -740,7 +740,12 @@ def pricing():
 def signup():
     """
     Cria workspace trial a partir de nome/email/empresa.
-    Importante: esta implementação é compatível com o schema atual (clients.client_id como PK).
+
+    Comportamento:
+    - Se email não existe: cria e retorna 201 com client_id + api_key
+    - Se email já existe e já tem api_key: retorna 200 com client_id + api_key (idempotente para UX do onboarding)
+      *Observação:* para produção, o ideal é fluxo de verificação de email antes de revelar a chave.
+    - Se email existe mas api_key está vazia: retorna 409 (conflito) sem expor chave
     """
     data = request.get_json(silent=True) or request.form or {}
     nome = (data.get('nome') or '').strip()
@@ -759,6 +764,18 @@ def signup():
                 cur.execute("SELECT client_id, api_key, valid_until FROM clients WHERE email = %s", (email,))
                 existing = cur.fetchone()
                 if existing:
+                    api_key_existing = (existing.get("api_key") or "").strip()
+                    if api_key_existing:
+                        return jsonify({
+                            "ok": True,
+                            "already_exists": True,
+                            "client_id": existing.get("client_id"),
+                            "api_key": api_key_existing,
+                            "plan": "trial",
+                            "valid_until": _iso(existing.get("valid_until")),
+                            "message": "Este email já estava cadastrado. Reutilizando a mesma conta trial.",
+                        }), 200
+
                     return jsonify({
                         "ok": False,
                         "error": "Este email já está cadastrado",
@@ -781,6 +798,7 @@ def signup():
 
         return jsonify({
             "ok": True,
+            "already_exists": False,
             "client_id": client_id,
             "api_key": api_key,
             "plan": "trial",
