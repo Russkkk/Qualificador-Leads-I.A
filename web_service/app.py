@@ -347,6 +347,7 @@ def _ensure_schema():
                         nome TEXT,
                         email TEXT,
                         empresa TEXT,
+                        telefone TEXT,
                         valid_until TIMESTAMPTZ,
                         -- auth / plan
                         api_key TEXT,
@@ -739,66 +740,75 @@ def pricing():
 @app.route('/signup', methods=['POST'])
 def signup():
     """
-    Cria workspace trial a partir de nome/email/empresa.
-
-    Comportamento:
-    - Se email não existe: cria e retorna 201 com client_id + api_key
-    - Se email já existe e já tem api_key: retorna 200 com client_id + api_key (idempotente para UX do onboarding)
-      *Observação:* para produção, o ideal é fluxo de verificação de email antes de revelar a chave.
-    - Se email existe mas api_key está vazia: retorna 409 (conflito) sem expor chave
+    Cria workspace trial a partir de nome/email/empresa (e opcional telefone).
+    - Mantém compatibilidade com o frontend (retorna ok e success).
+    - Em caso de email já cadastrado, retorna 409 com informações suficientes para orientar o usuário.
+      (Por padrão NÃO retorna api_key por segurança.)
     """
     data = request.get_json(silent=True) or request.form or {}
     nome = (data.get('nome') or '').strip()
     email = (data.get('email') or '').strip().lower()
     empresa = (data.get('empresa') or '').strip()
+    telefone = (data.get('telefone') or '').strip()
 
     if not email or '@' not in email:
-        return jsonify({"ok": False, "error": "Email válido é obrigatório"}), 400
+        return jsonify({"ok": False, "success": False, "error": "Email válido é obrigatório"}), 400
 
     _ensure_schema_once()
+    mk = _month_key()
+    valid_until = _now_utc() + timedelta(days=14)
+
+    # Se quiser permitir que o backend retorne a api_key quando o email já existir (NÃO recomendado),
+    # setar SIGNUP_RETURN_API_KEY_ON_CONFLICT=true no ambiente.
+    allow_return_key = (os.getenv("SIGNUP_RETURN_API_KEY_ON_CONFLICT") or "").strip().lower() in ("1","true","yes")
+
     conn = _db()
     try:
         with conn:
             with conn.cursor() as cur:
-                # email já cadastrado?
-                cur.execute("SELECT client_id, api_key, valid_until FROM clients WHERE email = %s", (email,))
+                cur.execute(
+                    """
+                    SELECT client_id, api_key, plan, status, valid_until, created_at
+                    FROM clients
+                    WHERE email = %s
+                    """,
+                    (email,),
+                )
                 existing = cur.fetchone()
                 if existing:
-                    api_key_existing = (existing.get("api_key") or "").strip()
-                    if api_key_existing:
-                        return jsonify({
-                            "ok": True,
-                            "already_exists": True,
-                            "client_id": existing.get("client_id"),
-                            "api_key": api_key_existing,
-                            "plan": "trial",
-                            "valid_until": _iso(existing.get("valid_until")),
-                            "message": "Este email já estava cadastrado. Reutilizando a mesma conta trial.",
-                        }), 200
-
-                    return jsonify({
+                    payload = {
                         "ok": False,
+                        "success": False,
                         "error": "Este email já está cadastrado",
+                        "code": "email_exists",
                         "client_id": existing.get("client_id"),
+                        "plan": existing.get("plan") or "trial",
+                        "status": existing.get("status") or "active",
                         "valid_until": _iso(existing.get("valid_until")),
-                    }), 409
+                        "created_at": _iso(existing.get("created_at")),
+                        "hint": "Use outro email ou acesse o dashboard com seu client_id e api_key.",
+                    }
+                    if allow_return_key:
+                        payload["api_key"] = (existing.get("api_key") or "").strip()
+                    return jsonify(payload), 409
 
                 api_key = _gen_api_key("trial")
                 client_id = f"trial-{secrets.token_hex(8)}"
-                mk = _month_key()
-                valid_until = _now_utc() + timedelta(days=14)
 
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO clients (
-                        client_id, nome, email, empresa,
+                        client_id, nome, email, empresa, telefone,
                         api_key, plan, status, usage_month, leads_used_month,
                         valid_until, created_at, updated_at
-                    ) VALUES (%s,%s,%s,%s,%s,'trial','active',%s,0,%s,NOW(),NOW())
-                """, (client_id, nome, email, empresa, api_key, mk, valid_until))
+                    ) VALUES (%s,%s,%s,%s,%s,%s,'trial','active',%s,0,%s,NOW(),NOW())
+                    """,
+                    (client_id, nome, email, empresa, telefone, api_key, mk, valid_until),
+                )
 
         return jsonify({
             "ok": True,
-            "already_exists": False,
+            "success": True,
             "client_id": client_id,
             "api_key": api_key,
             "plan": "trial",
@@ -806,9 +816,10 @@ def signup():
             "message": "Conta trial criada! Salve sua API key.",
         }), 201
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "success": False, "error": str(e)}), 500
     finally:
         conn.close()
+
 
 @app.post("/criar_cliente")
 def criar_cliente():
