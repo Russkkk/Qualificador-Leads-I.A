@@ -21,9 +21,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-import psycopg2
-from psycopg2.extras import RealDictCursor
-
+import psycopg
+from psycopg.rows import dict_row
 # optional ML deps (se não existirem, rotas de treino respondem com erro amigável)
 try:
     import numpy as np
@@ -118,7 +117,7 @@ def _top_origens(client_id: str, days: int = 30, limit: int = 6):
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor as cur:
                 cur.execute(
                     """
                     SELECT COALESCE(NULLIF(TRIM(origem), ''), 'desconhecida') AS origem,
@@ -142,7 +141,7 @@ def _hot_leads_today(client_id: str, limit: int = 20):
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor as cur:
                 cur.execute(
                     """
                     SELECT id, nome, telefone, email_lead, origem,
@@ -197,7 +196,8 @@ def _require_env_db():
 
 def _db():
     _require_env_db()
-    return psycopg2.connect(DATABASE_URL)
+    # psycopg v3 + dict rows (compatível com RealDictCursor)
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -460,7 +460,7 @@ def _ensure_client_row(client_id: str, plan: str = "trial") -> Dict[str, Any]:
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor as cur:
                 # cria se não existir
                 cur.execute("""
                     INSERT INTO clients (client_id, api_key, plan, status, usage_month, leads_used_month, updated_at)
@@ -550,7 +550,7 @@ def _get_threshold(client_id: str) -> float:
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor as cur:
                 cur.execute("SELECT threshold FROM thresholds WHERE client_id=%s", (client_id,))
                 row = cur.fetchone()
                 if row and row.get("threshold") is not None:
@@ -586,7 +586,7 @@ def _fetch_recent_leads(client_id: str, limit: int = 200) -> List[Dict[str, Any]
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor as cur:
                 cur.execute(
                     """
                     SELECT id, client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
@@ -625,7 +625,7 @@ def _get_labeled_rows(client_id: str) -> List[Dict[str, Any]]:
     conn = _db()
     try:
         with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with conn.cursor as cur:
                 cur.execute(
                     """
                     SELECT id, tempo_site, paginas_visitadas, clicou_preco, probabilidade, virou_cliente
@@ -821,7 +821,7 @@ def criar_cliente():
         conn = _db()
         try:
             with conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                with conn.cursor as cur:
                     cur.execute(
                         "UPDATE clients SET api_key=%s, plan=%s, updated_at=NOW() WHERE client_id=%s",
                         (api_key, plan, client_id),
