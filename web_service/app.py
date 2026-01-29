@@ -19,8 +19,6 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from werkzeug.security import generate_password_hash, check_password_hash
-
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
@@ -349,10 +347,7 @@ def _ensure_schema():
                         nome TEXT,
                         email TEXT,
                         empresa TEXT,
-                        telefone TEXT,
                         valid_until TIMESTAMPTZ,
-                        password_hash TEXT,
-                        last_login_at TIMESTAMPTZ,
                         -- auth / plan
                         api_key TEXT,
                         plan TEXT NOT NULL DEFAULT 'trial',
@@ -391,10 +386,6 @@ def _ensure_schema():
                 cur.execute("UPDATE clients SET updated_at=NOW() WHERE updated_at IS NULL;")
 
                 cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key) WHERE api_key <> '';")
-                try:
-                    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email_unique ON clients(email) WHERE email IS NOT NULL AND email<>'';")
-                except Exception:
-                    pass
                 cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_email ON clients(email) WHERE email IS NOT NULL AND email <> '';")
 
                 # -------------------------
@@ -722,7 +713,7 @@ def _best_threshold(rows: List[Dict[str, Any]]) -> float:
 # =========================
 @app.get("/")
 def root():
-    return jsonify({"ok": True, "service": "LeadRank backend", "ts": _iso(_now_utc())})
+    return jsonify({"ok": True, "success": True, "service": "LeadRank backend", "ts": _iso(_now_utc())})
 
 @app.get("/health")
 def health():
@@ -748,116 +739,53 @@ def pricing():
 @app.route('/signup', methods=['POST'])
 def signup():
     """
-    Cria workspace trial a partir de nome/email/empresa/telefone + senha.
-    Retorna ok+success para compatibilidade com o onboarding.
+    Cria workspace trial a partir de nome/email/empresa.
+    Importante: esta implementação é compatível com o schema atual (clients.client_id como PK).
     """
     data = request.get_json(silent=True) or request.form or {}
     nome = (data.get('nome') or '').strip()
     email = (data.get('email') or '').strip().lower()
     empresa = (data.get('empresa') or '').strip()
-    telefone = (data.get('telefone') or '').strip()
-    password = (data.get('password') or data.get('senha') or '').strip()
 
     if not email or '@' not in email:
         return jsonify({"ok": False, "success": False, "error": "Email válido é obrigatório"}), 400
-    if not password or len(password) < 6:
-        return jsonify({"ok": False, "success": False, "error": "Senha deve ter no mínimo 6 caracteres"}), 400
 
     _ensure_schema_once()
-
     conn = _db()
     try:
         with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT client_id FROM clients WHERE email=%s", (email,))
-                row = cur.fetchone()
-                if row:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # email já cadastrado?
+                cur.execute("SELECT client_id, api_key, valid_until FROM clients WHERE email = %s", (email,))
+                existing = cur.fetchone()
+                if existing:
                     return jsonify({
-                        "ok": False,
-                        "success": False,
-                        "error": "Este email já está cadastrado. Faça login.",
-                        "code": "email_exists"
+                        "ok": False, "success": False, "error": "Este email já está cadastrado",
+                        "client_id": existing.get("client_id"),
+                        "valid_until": _iso(existing.get("valid_until")),
                     }), 409
 
+                api_key = _gen_api_key("trial")
                 client_id = f"trial-{secrets.token_hex(8)}"
-                api_key = _gen_api_key(client_id)
                 mk = _month_key()
                 valid_until = _now_utc() + timedelta(days=14)
-                pw_hash = generate_password_hash(password)
 
                 cur.execute("""
                     INSERT INTO clients (
-                        client_id, nome, email, empresa, telefone, valid_until,
+                        client_id, nome, email, empresa,
                         api_key, plan, status, usage_month, leads_used_month,
-                        password_hash, created_at, updated_at
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,'trial','active',%s,0,%s,NOW(),NOW())
-                """, (
-                    client_id,
-                    nome or None, email, empresa or None, telefone or None, valid_until,
-                    api_key, mk, pw_hash
-                ))
+                        valid_until, created_at, updated_at
+                    ) VALUES (%s,%s,%s,%s,%s,'trial','active',%s,0,%s,NOW(),NOW())
+                """, (client_id, nome, email, empresa, api_key, mk, valid_until))
 
         return jsonify({
             "ok": True,
-            "success": True,
             "client_id": client_id,
             "api_key": api_key,
             "plan": "trial",
             "valid_until": _iso(valid_until),
-            "message": "Conta trial criada com sucesso!"
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "success": False, "error": str(e)}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/login', methods=['POST'])
-def login():
-    """Login com email+senha. Retorna client_id + api_key."""
-    data = request.get_json(silent=True) or request.form or {}
-    email = (data.get('email') or '').strip().lower()
-    password = (data.get('password') or data.get('senha') or '').strip()
-
-    if not email or '@' not in email:
-        return jsonify({"ok": False, "success": False, "error": "Email válido é obrigatório"}), 400
-    if not password:
-        return jsonify({"ok": False, "success": False, "error": "Senha é obrigatória"}), 400
-
-    _ensure_schema_once()
-    conn = _db()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT client_id, api_key, password_hash, plan, status, valid_until FROM clients WHERE email=%s", (email,))
-                row = cur.fetchone()
-                if not row:
-                    return jsonify({"ok": False, "success": False, "error": "Conta não encontrada"}), 404
-
-                pw_hash = (row.get('password_hash') or '').strip()
-                if not pw_hash:
-                    return jsonify({"ok": False, "success": False, "error": "Conta sem senha. Use o suporte."}), 400
-
-                if not check_password_hash(pw_hash, password):
-                    return jsonify({"ok": False, "success": False, "error": "Email ou senha inválidos"}), 401
-
-                api_key = (row.get('api_key') or '').strip()
-                if not api_key:
-                    api_key = _gen_api_key(row['client_id'])
-                    cur.execute("UPDATE clients SET api_key=%s, updated_at=NOW() WHERE client_id=%s", (api_key, row['client_id']))
-
-                cur.execute("UPDATE clients SET last_login_at=NOW(), updated_at=NOW() WHERE client_id=%s", (row['client_id'],))
-
-        return jsonify({
-            "ok": True,
-            "success": True,
-            "client_id": row['client_id'],
-            "api_key": api_key,
-            "plan": (row.get('plan') or 'trial'),
-            "status": (row.get('status') or 'active'),
-            "valid_until": _iso(row.get('valid_until')),
-            "message": "Login realizado com sucesso."
-        })
+            "message": "Conta trial criada! Salve sua API key.",
+        }), 201
     except Exception as e:
         return jsonify({"ok": False, "success": False, "error": str(e)}), 500
     finally:
