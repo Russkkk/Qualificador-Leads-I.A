@@ -770,7 +770,7 @@ def signup():
                     INSERT INTO clients (
                         client_id, api_key, plan, status, usage_month, leads_used_month,
                         nome, email, empresa, telefone, valid_until, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 """, (
                     client_id, api_key, 'trial', 'active', mk, 0,
                     nome or None, email, empresa or None, telefone or None, valid_until
