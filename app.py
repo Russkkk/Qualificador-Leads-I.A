@@ -1620,6 +1620,101 @@ def seed_demo():
         conn.close()
 
 
+@app.post("/seed_test_leads")
+def seed_test_leads():
+    """Gera leads de teste para um client_id autenticado."""
+    data = request.get_json(silent=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    n = max(1, min(_safe_int(data.get("count"), 10), 50))
+
+    if not client_id:
+        return _json_err("client_id obrigatório", 400)
+
+    ok_auth, client_row, msg = _require_client_auth(client_id)
+    if not ok_auth:
+        return _json_err(msg, 403, code="auth_required")
+
+    plan = (client_row.get("plan") or "trial").lower()
+    cat = PLAN_CATALOG.get(plan, PLAN_CATALOG["trial"])
+    used = int(client_row.get("leads_used_month") or 0)
+    limit = int(cat.get("lead_limit_month") or 0)
+    if limit > 0 and used + n > limit:
+        return _json_err(
+            "Limite mensal atingido. Faça upgrade para continuar.",
+            402,
+            code="plan_limit",
+            plan=plan,
+            used=used,
+            limit=limit,
+            price_brl_month=cat.get("price_brl_month"),
+            setup_fee_brl=cat.get("setup_fee_brl", 0),
+        )
+
+    inserted = 0
+    conv = 0
+    neg = 0
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for _ in range(n):
+                    tempo_site = random.randint(15, 420)
+                    paginas = random.randint(1, 10)
+                    clicou_preco = random.choice([0, 1])
+
+                    base = 0.08
+                    base += min(tempo_site / 450, 0.25)
+                    base += min(paginas / 12, 0.25)
+                    base += 0.22 if clicou_preco else 0.0
+                    prob = max(0.03, min(0.97, base + random.uniform(-0.05, 0.05)))
+
+                    label_vc = random.choices([None, 1.0, 0.0], weights=[0.45, 0.30, 0.25])[0]
+                    if label_vc == 1.0:
+                        conv += 1
+                    elif label_vc == 0.0:
+                        neg += 1
+
+                    nome = "Teste " + "".join(random.choice(string.ascii_uppercase) for _ in range(4))
+                    email = "teste@leadrank.local"
+                    telefone = "11999990000"
+                    payload = {
+                        "nome": nome,
+                        "email": email,
+                        "telefone": telefone,
+                        "tempo_site": tempo_site,
+                        "paginas_visitadas": paginas,
+                        "clicou_preco": clicou_preco,
+                    }
+
+                    cur.execute(
+                        """
+                        INSERT INTO leads
+                          (client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
+                           payload, probabilidade, virou_cliente, created_at, updated_at)
+                        VALUES
+                          (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,NOW(),NOW())
+                        """,
+                        (client_id, nome, email, telefone, tempo_site, paginas, clicou_preco, json.dumps(payload), float(prob), label_vc),
+                    )
+                    inserted += 1
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE clients SET leads_used_month = leads_used_month + %s, updated_at=NOW() WHERE client_id=%s",
+                    (inserted, client_id),
+                )
+
+        return _json_ok({
+            "client_id": client_id,
+            "inserted": inserted,
+            "converted": conv,
+            "denied": neg,
+            "pending": inserted - conv - neg,
+        })
+    finally:
+        conn.close()
+
+
 # =========================
 # Run local
 # =========================
