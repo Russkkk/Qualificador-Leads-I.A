@@ -87,6 +87,15 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 
 
+@app.before_request
+def _handle_preflight_options():
+    # Alguns browsers enviam preflight (OPTIONS) para qualquer POST/JSON.
+    # Garantimos 204 para não estourar CORS por 405/404.
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+
+
 # =========================
 # Utils
 # =========================
@@ -828,7 +837,7 @@ def login():
     conn = _db()
     try:
         with conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("SELECT client_id, api_key, password_hash, plan, status, valid_until FROM clients WHERE email=%s", (email,))
                 row = cur.fetchone()
                 if not row:
@@ -1449,6 +1458,86 @@ def leads_export_csv():
         headers={"Content-Disposition": f'attachment; filename="leadrank_{client_id}.csv"'},
     )
 
+
+
+@app.route("/seed_test_leads", methods=["POST", "OPTIONS"])
+def seed_test_leads():
+    """Gera N leads de teste para um client_id (para treino/visualização).
+    - Se o client não tem api_key, permite sem header (compatibilidade).
+    - Se tem api_key, exige X-API-KEY / Authorization Bearer.
+    """
+    if request.method == "OPTIONS":
+        # preflight CORS
+        return ("", 204)
+
+    data = request.get_json(silent=True) or {}
+    client_id = (data.get("client_id") or "").strip()
+    n = max(10, min(_safe_int(data.get("n") or data.get("count"), 10), 200))
+
+    if not client_id:
+        return _json_err("client_id é obrigatório", 400, code="missing_client_id")
+
+    # auth (se existir api_key no workspace)
+    ok, row, err = _require_client_auth(client_id)
+    if not ok:
+        return _json_err("Unauthorized", 403, reason=err, code="unauthorized")
+
+    _ensure_client_row(client_id, plan=(row.get("plan") or "trial"))
+    _ensure_schema_once()
+
+    inserted = 0
+    conv = 0
+    neg = 0
+
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for _ in range(n):
+                    tempo_site = random.randint(15, 420)
+                    paginas = random.randint(1, 10)
+                    clicou_preco = random.choice([0, 1])
+
+                    base = 0.08
+                    base += min(tempo_site / 450, 0.25)
+                    base += min(paginas / 12, 0.25)
+                    base += 0.22 if clicou_preco else 0.0
+                    prob = max(0.03, min(0.97, base + random.uniform(-0.05, 0.05)))
+
+                    label_vc = random.choices([None, 1.0, 0.0], weights=[0.45, 0.30, 0.25])[0]
+                    if label_vc == 1.0:
+                        conv += 1
+                    elif label_vc == 0.0:
+                        neg += 1
+
+                    nome = "Teste " + "".join(random.choice(string.ascii_uppercase) for _ in range(4))
+                    email = f"teste_{random.randint(1000,9999)}@leadrank.local"
+                    telefone = "11999990000"
+                    payload = {
+                        "nome": nome,
+                        "email": email,
+                        "telefone": telefone,
+                        "tempo_site": tempo_site,
+                        "paginas_visitadas": paginas,
+                        "clicou_preco": clicou_preco,
+                        "origem": random.choice(["instagram", "google", "whatsapp", "site", "indicacao"]),
+                    }
+
+                    cur.execute(
+                        """
+                        INSERT INTO leads
+                          (client_id, nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
+                           payload, probabilidade, virou_cliente, created_at, updated_at)
+                        VALUES
+                          (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,NOW(),NOW())
+                        """,
+                        (client_id, nome, email, telefone, tempo_site, paginas, clicou_preco, json.dumps(payload), float(prob), label_vc),
+                    )
+                    inserted += 1
+
+        return _json_ok({"client_id": client_id, "inserted": inserted, "converted": conv, "denied": neg, "pending": inserted - conv - neg})
+    finally:
+        conn.close()
 
 @app.post("/demo_public")
 def demo_public():
