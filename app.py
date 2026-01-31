@@ -398,7 +398,10 @@ def _ensure_schema():
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS nome TEXT;")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS empresa TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS telefone TEXT;")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS valid_until TIMESTAMPTZ;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS password_hash TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;")
 
                 # bancos antigos podem ter api_key NOT NULL -> drop
                 try:
