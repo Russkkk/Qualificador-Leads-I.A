@@ -51,6 +51,13 @@ STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PRICE_IDS_JSON = os.environ.get("STRIPE_PRICE_IDS_JSON", "").strip()
 BILLING_WEBHOOK_SECRET = os.environ.get("BILLING_WEBHOOK_SECRET", "").strip()
 
+# Kiwify (opcional)
+KIWIFY_ACCOUNT_ID = os.environ.get("KIWIFY_ACCOUNT_ID", "").strip()  # x-kiwify-account-id
+KIWIFY_CLIENT_SECRET = os.environ.get("KIWIFY_CLIENT_SECRET", "").strip()
+KIWIFY_API_KEY = os.environ.get("KIWIFY_API_KEY", "").strip()        # api_key usada no OAuth
+KIWIFY_WEBHOOK_TOKEN = os.environ.get("KIWIFY_WEBHOOK_TOKEN", "").strip()  # token configurado no webhook
+
+
 # ajuste aqui seus domínios permitidos no CORS
 ALLOWED_ORIGINS = [
     "null",  # permite testar abrindo HTML via file://
@@ -1917,6 +1924,139 @@ def billing_webhook():
             return _json_err("Evento recebido, mas falhou ao aplicar.", 500, detail=repr(e))
 
     return _json_ok({"received": True})
+
+
+# -------------------------
+# Kiwify webhook (opcional)
+# -------------------------
+
+_KIWIFY_OAUTH_CACHE = {"token": "", "expires_at": 0}
+
+def _kiwify_get_token() -> Optional[str]:
+    """Gera/cacheia Bearer token OAuth da API pública da Kiwify (expira em ~96h)."""
+    if not (KIWIFY_API_KEY and KIWIFY_CLIENT_SECRET and KIWIFY_ACCOUNT_ID):
+        return None
+    now = int(time.time())
+    if _KIWIFY_OAUTH_CACHE.get("token") and now < int(_KIWIFY_OAUTH_CACHE.get("expires_at") or 0) - 60:
+        return _KIWIFY_OAUTH_CACHE["token"]
+    import requests
+    url = "https://public-api.kiwify.com/oauth/token"
+    r = requests.post(url, json={"api_key": KIWIFY_API_KEY, "client_secret": KIWIFY_CLIENT_SECRET}, timeout=20)
+    if r.status_code >= 400:
+        return None
+    try:
+        j = r.json()
+    except Exception:
+        j = {}
+    token = (j.get("access_token") or "").strip()
+    expires_in = int(j.get("expires_in") or 96 * 3600)
+    if token:
+        _KIWIFY_OAUTH_CACHE["token"] = token
+        _KIWIFY_OAUTH_CACHE["expires_at"] = now + expires_in
+        return token
+    return None
+
+def _kiwify_get_sale(order_id: str) -> Optional[Dict[str, Any]]:
+    """Busca detalhes da venda (order_id) via API pública."""
+    tok = _kiwify_get_token()
+    if not tok:
+        return None
+    import requests
+    url = f"https://public-api.kiwify.com/v1/sales/{order_id}"
+    headers = {"Authorization": f"Bearer {tok}", "x-kiwify-account-id": KIWIFY_ACCOUNT_ID}
+    r = requests.get(url, headers=headers, timeout=20)
+    if r.status_code >= 400:
+        return None
+    try:
+        return r.json()
+    except Exception:
+        return None
+
+def _extract_first(d: Dict[str, Any], keys: List[str]) -> str:
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+def _find_client_id_from_payload(payload: Dict[str, Any]) -> str:
+    # tenta vários formatos comuns
+    direct = _extract_first(payload, ["client_id", "clientId", "workspace_id", "workspaceId", "s1"])
+    if direct:
+        return direct
+    for k in ("tracking", "utm", "data", "sale", "order", "customer"):
+        v = payload.get(k)
+        if isinstance(v, dict):
+            got = _extract_first(v, ["client_id", "clientId", "workspace_id", "workspaceId", "s1"])
+            if got:
+                return got
+    return ""
+
+def _kiwify_event_to_status(event_type: str) -> str:
+    t = (event_type or "").strip().lower()
+    if t in ("compra_aprovada", "subscription_renewed"):
+        return "active"
+    if t in ("subscription_late",):
+        return "past_due"
+    if t in ("compra_reembolsada", "chargeback", "subscription_canceled"):
+        return "canceled"
+    if t in ("compra_recusada",):
+        return "inactive"
+    return "inactive"
+
+
+@app.post("/kiwify/webhook")
+def kiwify_webhook():
+    """Recebe eventos da Kiwify e aplica status/plan no seu app."""
+    payload = request.get_json(silent=True) or {}
+
+    # valida token do webhook (configurado na Kiwify)
+    if KIWIFY_WEBHOOK_TOKEN:
+        got = _extract_first(payload, ["token", "webhook_token", "secret"])
+        if got != KIWIFY_WEBHOOK_TOKEN:
+            return _json_err("Unauthorized", 403)
+
+    event_type = _extract_first(payload, ["event", "event_type", "type", "trigger"]) or "unknown"
+    provider = "kiwify"
+
+    # 1) tenta pegar client_id do payload
+    client_id = _find_client_id_from_payload(payload)
+
+    # 2) se veio order_id, tenta enriquecer via API pública para achar custom params
+    order_id = _extract_first(payload, ["order_id", "orderId", "sale_id", "saleId", "id"])
+    sale = None
+    if order_id and not client_id:
+        sale = _kiwify_get_sale(order_id)
+        if isinstance(sale, dict):
+            client_id = _find_client_id_from_payload(sale)
+
+    # plan: tenta "plan"/"s2"
+    plan = _extract_first(payload, ["plan", "s2"])
+    if not plan and isinstance(sale, dict):
+        plan = _extract_first(sale, ["plan", "s2"])
+
+    status = _kiwify_event_to_status(event_type)
+
+    # log do evento (reusa billing_events)
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "INSERT INTO billing_events (provider, event_type, client_id, payload) VALUES (%s,%s,%s,%s::jsonb)",
+                    (provider, event_type, client_id or None, json.dumps(payload))
+                )
+    finally:
+        conn.close()
+
+    if client_id and plan:
+        try:
+            _upsert_subscription(client_id, plan=plan.strip().lower(), status=status, provider=provider)
+        except Exception as e:
+            return _json_err("Evento recebido, mas falhou ao aplicar.", 500, detail=repr(e))
+
+    return _json_ok({"received": True, "provider": provider, "event_type": event_type})
+
 
 
 # =========================
