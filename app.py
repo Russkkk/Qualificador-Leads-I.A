@@ -45,6 +45,10 @@ except Exception:
 # =========================
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 DEMO_KEY = os.environ.get("DEMO_KEY", "").strip()
+DEBUG_MODE = os.environ.get("DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+INCLUDE_TRACEBACK = os.environ.get("INCLUDE_TRACEBACK", "").strip().lower() in {"1", "true", "yes", "on"}
+TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in {"1", "true", "yes", "on"}
+REQUIRE_API_KEY = os.environ.get("REQUIRE_API_KEY", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Billing / Premium (opcional)
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
@@ -227,12 +231,16 @@ def handle_exception(err: Exception):
             error_type=err.__class__.__name__,
         )
     trace = _log_exception("Unhandled exception")
+    payload = {
+        "code": "internal_error",
+        "error_type": err.__class__.__name__,
+    }
+    if DEBUG_MODE or INCLUDE_TRACEBACK:
+        payload["trace"] = trace
     return _json_err(
         "Erro interno do servidor",
         500,
-        code="internal_error",
-        error_type=err.__class__.__name__,
-        trace=trace,
+        **payload,
     )
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -305,7 +313,11 @@ def _get_api_key_from_headers() -> str:
     return key
 
 def _client_ip() -> str:
-    return (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
+    if TRUST_PROXY:
+        forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+    return (request.remote_addr or "unknown").strip()
 
 def _check_demo_key() -> bool:
     ok, _ = _require_demo_key()
@@ -568,6 +580,20 @@ def _require_client_auth(client_id: str) -> Tuple[bool, Dict[str, Any], str]:
     row = _ensure_client_row(client_id, plan="trial")
     expected = (row.get("api_key") or "").strip()
     if not expected:
+        if REQUIRE_API_KEY:
+            api_key = _gen_api_key(client_id)
+            conn = _db()
+            try:
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE clients SET api_key=%s, updated_at=NOW() WHERE client_id=%s",
+                            (api_key, client_id),
+                        )
+                row["api_key"] = api_key
+            finally:
+                conn.close()
+            return False, row, "api_key necessária. Gere/recupere uma chave e envie no header."
         return True, row, ""
 
     got = _get_api_key_from_headers()
