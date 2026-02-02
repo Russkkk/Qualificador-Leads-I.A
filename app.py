@@ -227,11 +227,12 @@ def handle_exception(err: Exception):
         return _json_err(
             err.description,
             err.code or 500,
-            code="http_error",
+            error_code="http_error",
             error_type=err.__class__.__name__,
         )
     trace = _log_exception("Unhandled exception")
     payload = {
+        "error_code": "internal_error",
         "code": "internal_error",
         "error_type": err.__class__.__name__,
     }
