@@ -187,27 +187,23 @@ def _hot_leads_today(client_id: str, limit: int = 20):
         conn.close()
 
 def _lead_temperature(probabilidade: Optional[float], score: Optional[int]) -> str:
-    """Classifica 'temperatura' do lead de forma consistente.
-
-    Regras:
-      - hot  : prob>=0.70 ou score>=70
-      - warm : prob>=0.35 ou score>=35
-      - cold : abaixo disso
-      - unknown: quando ambos ausentes
-    """
+    """Classifica o lead em hot/warm/cold usando probabilidade (0..1) e/ou score (0..100)."""
     prob = _safe_float(probabilidade, None)
-    score_val = None if score is None else _safe_int(score, 0)
+    score_val = _safe_int(score, 0) if score is not None else None
 
+    # se não tem nenhum sinal, não classifica
     if prob is None and score_val is None:
         return "unknown"
 
+    # Hot: >= 0.70 (ou >= 70)
     if (prob is not None and prob >= 0.70) or (score_val is not None and score_val >= 70):
         return "hot"
+
+    # Warm: >= 0.35 (ou >= 35)
     if (prob is not None and prob >= 0.35) or (score_val is not None and score_val >= 35):
         return "warm"
+
     return "cold"
-
-
 def _resp(payload: Dict[str, Any], code: int = 200):
     return jsonify(payload), code
 
@@ -2132,6 +2128,10 @@ def funnels():
 
 @app.get("/acao_do_dia")
 def acao_do_dia():
+    """Retorna um resumo do dia + lista priorizada de leads para ação (mais quentes primeiro).
+
+    Compatibilidade: além de `items`, também retorna `action_list` (alias).
+    """
     client_id = (request.args.get("client_id") or "").strip()
     limit = _safe_int(request.args.get("limit"), 50)
     limit = max(10, min(limit, 200))
@@ -2143,41 +2143,49 @@ def acao_do_dia():
         return _json_err(msg, 403, code="auth_required")
 
     start_utc, end_utc = _sp_today_bounds_utc()
+
     conn = _db()
     try:
         with conn:
             with conn.cursor(row_factory=dict_row) as cur:
+                # resumo do dia (hot/warm/cold + convertidos)
                 cur.execute(
                     """
                     SELECT
                       SUM(CASE WHEN created_at >= %s AND created_at <= %s
-                                AND ((probabilidade IS NOT NULL AND probabilidade >= 0.70) OR (score IS NOT NULL AND score >= 70))
+                                AND ((probabilidade IS NOT NULL AND probabilidade >= 0.70)
+                                     OR (score IS NOT NULL AND score >= 70))
                                THEN 1 ELSE 0 END) AS hot_today,
+
                       SUM(CASE WHEN created_at >= %s AND created_at <= %s
                                 AND ((probabilidade IS NOT NULL AND probabilidade >= 0.35 AND probabilidade < 0.70)
                                      OR (score IS NOT NULL AND score >= 35 AND score < 70))
                                THEN 1 ELSE 0 END) AS warm_today,
+
                       SUM(CASE WHEN created_at >= %s AND created_at <= %s
                                 AND ((probabilidade IS NOT NULL AND probabilidade < 0.35)
                                      OR (score IS NOT NULL AND score < 35))
-                                AND ((probabilidade IS NOT NULL AND probabilidade >= 0.35 AND probabilidade < 0.70)
-                                     OR (score IS NOT NULL AND score >= 35 AND score < 70))
-                               THEN 1 ELSE 0 END) AS warm_today,
-                      SUM(CASE WHEN created_at >= %s AND created_at <= %s
-                                AND ((probabilidade IS NOT NULL AND probabilidade < 0.35) OR (score IS NOT NULL AND score < 35))
                                THEN 1 ELSE 0 END) AS cold_today,
-                      SUM(CASE WHEN updated_at >= %s AND updated_at <= %s AND virou_cliente = 1 THEN 1 ELSE 0 END) AS converted_today
+
+                      SUM(CASE WHEN updated_at >= %s AND updated_at <= %s AND virou_cliente = 1
+                               THEN 1 ELSE 0 END) AS converted_today
                     FROM leads
                     WHERE client_id=%s
                     """,
-                    (start_utc, end_utc, start_utc, end_utc, start_utc, end_utc, start_utc, end_utc, client_id),
+                    (start_utc, end_utc,
+                     start_utc, end_utc,
+                     start_utc, end_utc,
+                     start_utc, end_utc,
+                     client_id),
                 )
                 summary_row = cur.fetchone() or {}
 
+                # lista priorizada para ação
                 cur.execute(
                     """
-                    SELECT id, nome, telefone, email_lead, origem,
-                           score, probabilidade, created_at, virou_cliente
+                    SELECT
+                      id, nome, telefone, email_lead, origem,
+                      score, probabilidade, created_at, virou_cliente
                     FROM leads
                     WHERE client_id=%s
                     ORDER BY COALESCE(probabilidade, score / 100.0) DESC NULLS LAST,
@@ -2188,16 +2196,14 @@ def acao_do_dia():
                 )
                 items = cur.fetchall()
 
-        payload_items = []
+        payload_items: List[Dict[str, Any]] = []
         for item in items:
- 
             status = "pendente"
             if item.get("virou_cliente") == 1:
                 status = "convertido"
             elif item.get("virou_cliente") == 0:
                 status = "negado"
 
- 
             payload_items.append({
                 "id": int(item.get("id") or 0),
                 "nome": item.get("nome"),
@@ -2211,7 +2217,7 @@ def acao_do_dia():
                 "created_at": _iso(item.get("created_at")),
             })
 
-        return _json_ok({
+        result = {
             "workspace": {
                 "client_id": client_id,
                 "plan": (client_row.get("plan") or "trial").strip().lower(),
@@ -2223,11 +2229,12 @@ def acao_do_dia():
                 "converted_today": int(summary_row.get("converted_today") or 0),
             },
             "items": payload_items,
-        })
+            # alias para front antigo
+            "action_list": payload_items,
+        }
+        return _json_ok(result)
     finally:
         conn.close()
-
-
 @app.get("/lead_explain")
 def lead_explain():
     client_id = (request.args.get("client_id") or "").strip()
