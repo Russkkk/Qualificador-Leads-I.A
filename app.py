@@ -186,6 +186,36 @@ def _hot_leads_today(client_id: str, limit: int = 20):
     finally:
         conn.close()
 
+def _lead_temperature(probabilidade: Optional[float], score: Optional[int]) -> str:
+    prob = _safe_float(probabilidade, None)
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+
+ codex/implementar-resumo-do-dia-com-leads-vmr4y6
+ main
+ main
+    score_val = _safe_int(score, 0) if score is not None else None
+    if prob is None and score_val is None:
+        return "unknown"
+    if (prob is not None and prob >= 0.70) or score_val >= 70:
+        return "hot"
+    if (prob is not None and 0.40 <= prob < 0.70) or (score_val is not None and 40 <= score_val < 70):
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+
+
+    score_val = _safe_int(score, 0)
+    if (prob is not None and prob >= 0.70) or score_val >= 70:
+        return "hot"
+    if (prob is not None and prob >= 0.35) or score_val >= 35:
+ main
+ main
+ main
+        return "warm"
+    return "cold"
+
 def _resp(payload: Dict[str, Any], code: int = 200):
     return jsonify(payload), code
 
@@ -2103,6 +2133,141 @@ def funnels():
             "negados": int(row.get("negados") or 0),
             "pendentes": int(row.get("pendentes") or 0),
             "conversion_rate_labeled": conv_rate,
+        })
+    finally:
+        conn.close()
+
+
+@app.get("/acao_do_dia")
+def acao_do_dia():
+    client_id = (request.args.get("client_id") or "").strip()
+    limit = _safe_int(request.args.get("limit"), 50)
+    limit = max(10, min(limit, 200))
+    if not client_id:
+        return _json_err("client_id obrigatório", 400)
+
+    ok_auth, client_row, msg = _require_client_auth(client_id)
+    if not ok_auth:
+        return _json_err(msg, 403, code="auth_required")
+
+    start_utc, end_utc = _sp_today_bounds_utc()
+    conn = _db()
+    try:
+        with conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                      SUM(CASE WHEN created_at >= %s AND created_at <= %s
+                                AND ((probabilidade IS NOT NULL AND probabilidade >= 0.70) OR (score IS NOT NULL AND score >= 70))
+                               THEN 1 ELSE 0 END) AS hot_today,
+                      SUM(CASE WHEN created_at >= %s AND created_at <= %s
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+
+ codex/implementar-resumo-do-dia-com-leads-vmr4y6
+ main
+ main
+                                AND ((probabilidade IS NOT NULL AND probabilidade >= 0.40 AND probabilidade < 0.70)
+                                     OR (score IS NOT NULL AND score >= 40 AND score < 70))
+                               THEN 1 ELSE 0 END) AS warm_today,
+                      SUM(CASE WHEN created_at >= %s AND created_at <= %s
+                                AND ((probabilidade IS NOT NULL AND probabilidade < 0.40)
+                                     OR (score IS NOT NULL AND score < 40))
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+
+
+                                AND ((probabilidade IS NOT NULL AND probabilidade >= 0.35 AND probabilidade < 0.70)
+                                     OR (score IS NOT NULL AND score >= 35 AND score < 70))
+                               THEN 1 ELSE 0 END) AS warm_today,
+                      SUM(CASE WHEN created_at >= %s AND created_at <= %s
+                                AND ((probabilidade IS NOT NULL AND probabilidade < 0.35) OR (score IS NOT NULL AND score < 35))
+
+ main
+ main
+                               THEN 1 ELSE 0 END) AS cold_today,
+                      SUM(CASE WHEN updated_at >= %s AND updated_at <= %s AND virou_cliente = 1 THEN 1 ELSE 0 END) AS converted_today
+                    FROM leads
+                    WHERE client_id=%s
+                    """,
+                    (start_utc, end_utc, start_utc, end_utc, start_utc, end_utc, start_utc, end_utc, client_id),
+                )
+                summary_row = cur.fetchone() or {}
+
+                cur.execute(
+                    """
+                    SELECT id, nome, telefone, email_lead, origem,
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+                           score, probabilidade, created_at, virou_cliente
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+                           score, probabilidade, created_at, virou_cliente
+
+                           score, probabilidade, created_at
+ main
+ main
+                    FROM leads
+                    WHERE client_id=%s
+                    ORDER BY COALESCE(probabilidade, score / 100.0) DESC NULLS LAST,
+                             created_at DESC
+                    LIMIT %s
+                    """,
+                    (client_id, limit),
+                )
+                items = cur.fetchall()
+
+        payload_items = []
+        for item in items:
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+ main
+            status = "pendente"
+            if item.get("virou_cliente") == 1:
+                status = "convertido"
+            elif item.get("virou_cliente") == 0:
+                status = "negado"
+
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+
+
+ main
+ main
+            payload_items.append({
+                "id": int(item.get("id") or 0),
+                "nome": item.get("nome"),
+                "telefone": item.get("telefone"),
+                "email_lead": item.get("email_lead"),
+                "origem": item.get("origem"),
+                "score": _safe_int(item.get("score"), 0) if item.get("score") is not None else None,
+                "probabilidade": _safe_float(item.get("probabilidade"), None),
+                "temperatura": _lead_temperature(item.get("probabilidade"), item.get("score")),
+ codex/implementar-resumo-do-dia-com-leads-xeeucz
+                "status": status,
+
+ codex/implementar-resumo-do-dia-com-leads-948o9u
+                "status": status,
+
+ main
+ main
+                "created_at": _iso(item.get("created_at")),
+            })
+
+        return _json_ok({
+            "workspace": {
+                "client_id": client_id,
+                "plan": (client_row.get("plan") or "trial").strip().lower(),
+            },
+            "summary": {
+                "hot": int(summary_row.get("hot_today") or 0),
+                "warm": int(summary_row.get("warm_today") or 0),
+                "cold": int(summary_row.get("cold_today") or 0),
+                "converted_today": int(summary_row.get("converted_today") or 0),
+            },
+            "items": payload_items,
         })
     finally:
         conn.close()
