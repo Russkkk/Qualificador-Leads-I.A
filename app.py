@@ -278,16 +278,14 @@ def _get_header(name: str) -> str:
 
 def _require_demo_key() -> tuple[bool, str | None]:
     """Valida DEMO_KEY de forma compatível (header/query/body)."""
-    expected = (os.getenv("DEMO_KEY") or "").strip()
+    expected = (DEMO_KEY or "").strip()
     if not expected:
         return False, "DEMO_KEY não configurada no ambiente"
 
     # aceita header (qualquer case), Authorization Bearer, query param e body
-    got = (
-        (request.headers.get("x-demo-key") or request.headers.get("X-DEMO-KEY") or "").strip()
-    )
+    got = _get_header("X-DEMO-KEY")
     if not got:
-        auth = (request.headers.get("Authorization") or "").strip()
+        auth = _get_header("Authorization")
         if auth.lower().startswith("bearer "):
             got = auth.split(" ", 1)[1].strip()
 
