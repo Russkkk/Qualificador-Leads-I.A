@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LeadRank - Qualificador de Leads com IA</title>
+    <meta name="description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+    <meta property="og:title" content="LeadRank - Qualificador de Leads com IA">
+    <meta property="og:description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+    <meta property="og:image" content="assets/og-image.svg">
+    <meta property="og:url" content="https://leadrank.com.br/">
+    <meta name="theme-color" content="#2563EB">
+    <meta name="backend-url" content="https://qualificador-leads-ia.onrender.com">
+    <link rel="icon" href="assets/favicon.svg">
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="assets/tailwind.css" />
+  </head>
+  <body data-active-nav="login" class="bg-slate-950 text-slate-100">
+    <template id="header-actions-template">
+      <a class="btn btn--ghost btn--small" href="onboarding.html">Criar conta</a>
+    </template>
+    <div class="page">
+      <div data-include="site-header"></div>
+
+      <main class="mx-auto w-full max-w-5xl px-6 pb-16 pt-10">
+        <section class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+          <div class="space-y-6">
+            <p class="eyebrow text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Bem-vindo de volta</p>
+            <h1 class="text-3xl font-semibold text-white sm:text-4xl">Acesse sua Ação do Dia em segundos.</h1>
+            <p class="text-sm text-slate-300">
+              Conecte-se para ver os leads com maior probabilidade de fechar e manter o time focado.
+            </p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p class="text-sm font-semibold text-white">Pipeline sempre atualizado</p>
+                <p class="text-xs text-slate-400">Ranking diário e integração com CRM.</p>
+              </div>
+              <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p class="text-sm font-semibold text-white">Score em tempo real</p>
+                <p class="text-xs text-slate-400">Alertas automáticos para leads quentes.</p>
+              </div>
+            </div>
+            <div class="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+              <img
+                src="assets/dashboard-mock.svg"
+                alt="Prévia do ranking diário de leads"
+                class="w-full object-cover"
+              />
+            </div>
+          </div>
+          <div class="rounded-3xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-emerald-500/10">
+            <form class="space-y-4" id="loginForm">
+              <h2 class="text-xl font-semibold text-white">Entrar na plataforma</h2>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Email
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-blue-400 focus:outline-none" name="email" id="loginEmail" type="email" placeholder="seu@email.com" required />
+              </label>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Senha
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-blue-400 focus:outline-none" name="password" id="loginPassword" type="password" placeholder="Sua senha" required />
+              </label>
+              <button class="btn btn--block w-full rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:bg-blue-500" type="submit">
+                Acessar dashboard
+              </button>
+              <p class="text-xs text-slate-400">Esqueceu sua senha? Entre em contato com o suporte.</p>
+            </form>
+            <div class="alert mt-4 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-200" id="loginError" style="display: none;"></div>
+            <div class="mt-4 text-xs text-slate-400">
+              Não tem conta? <a class="font-semibold text-emerald-300 hover:text-emerald-200" href="onboarding.html">Criar agora</a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div data-include="site-footer"></div>
+    </div>
+    <script src="partials/site-shell.js"></script>
+    <script>
+      const backendMeta = document.querySelector('meta[name="backend-url"]');
+      const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+      const loginForm = document.getElementById("loginForm");
+      const loginError = document.getElementById("loginError");
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        loginError.className = "alert";
+        loginError.style.display = "none";
+
+        const email = document.getElementById("loginEmail").value.trim().toLowerCase();
+        const password = document.getElementById("loginPassword").value.trim();
+
+        if (!email || !password) {
+          loginError.textContent = "Email e senha são obrigatórios.";
+          loginError.className = "alert alert--error";
+          loginError.style.display = "block";
+          return;
+        }
+
+        try {
+          const res = await fetch(BACKEND + "/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data.error || data.message || "Falha ao entrar.");
+          }
+
+          const clientId = data.client_id || "";
+          const apiKey = res.headers.get("X-API-KEY") || "";
+          if (clientId) {
+            localStorage.setItem("leadrank_client_id", clientId);
+            localStorage.setItem("client_id", clientId);
+            localStorage.setItem("LR_CLIENT_ID", clientId);
+          }
+          if (apiKey) {
+            localStorage.setItem("leadrank_api_key", apiKey);
+            localStorage.setItem("api_key", apiKey);
+            localStorage.setItem("LR_API_KEY", apiKey);
+          }
+
+          const next = new URLSearchParams(location.search).get('next') || '';
+          window.location.href = next || "acao.html";
+        } catch (err) {
+          loginError.textContent = err.message || "Erro de conexão. Tente novamente.";
+          loginError.className = "alert alert--error";
+          loginError.style.display = "block";
+        }
+      });
+    </script>
+  </body>
+</html>

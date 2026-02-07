@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeadRank • Criar conta</title>
+  <meta name="backend-url" content="https://qualificador-leads-ia.onrender.com">
+  <meta name="description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+  <meta property="og:title" content="LeadRank - Qualificador de Leads com IA">
+  <meta property="og:description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+  <meta property="og:image" content="assets/og-image.svg">
+  <meta property="og:url" content="https://leadrank.com.br/">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="LeadRank - Qualificador de Leads com IA">
+  <meta name="twitter:description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+  <meta name="twitter:image" content="assets/og-image.svg">
+  <meta name="theme-color" content="#4f7cff">
+  <link rel="icon" href="assets/favicon.svg">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="assets/tailwind.css" />
+  <style>
+    .step-panel {
+      display: none;
+    }
+
+    .step-panel.is-active {
+      display: block;
+    }
+
+    .stepper__item.is-active {
+      color: #f8fafc;
+    }
+
+    .stepper__item.is-active .stepper__dot {
+      border-color: rgba(79, 124, 255, 0.7);
+      background: rgba(79, 124, 255, 0.15);
+      color: #a5b4fc;
+    }
+  </style>
+</head>
+<body data-active-nav="onboarding" class="bg-slate-950 text-slate-100">
+  <template id="header-actions-template">
+    <a class="btn btn--ghost inline-flex items-center justify-center rounded-full border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500" href="#login">Entrar</a>
+  </template>
+  <div class="page min-h-screen">
+    <div data-include="site-header"></div>
+
+    <main class="mx-auto w-full max-w-5xl px-6 pb-16 pt-10">
+      <section class="auth onboarding space-y-8" id="login">
+        <div class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+          <div class="space-y-8">
+            <div>
+              <p class="eyebrow text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">LeadRank onboarding</p>
+              <h1 class="text-3xl font-semibold text-white sm:text-4xl">Configure sua conta em 4 passos</h1>
+              <p class="subtitle text-slate-300">Crie sua conta, acesse sua API Key e integre o LeadRank.</p>
+              <div class="stepper mt-8 grid gap-4">
+                <div class="stepper__item is-active flex items-center gap-3 text-slate-300" data-step="1">
+                  <span class="stepper__dot flex h-7 w-7 items-center justify-center rounded-full border border-slate-700 text-xs font-semibold">1</span>
+                  <div>
+                    <strong>Cadastro</strong>
+                    <p class="text-muted text-sm text-slate-400">Crie sua conta trial</p>
+                  </div>
+                </div>
+                <div class="stepper__item flex items-center gap-3 text-slate-300" data-step="2">
+                  <span class="stepper__dot flex h-7 w-7 items-center justify-center rounded-full border border-slate-700 text-xs font-semibold">2</span>
+                  <div>
+                    <strong>Sua API Key</strong>
+                    <p class="text-muted text-sm text-slate-400">Guarde com segurança</p>
+                  </div>
+                </div>
+                <div class="stepper__item flex items-center gap-3 text-slate-300" data-step="3">
+                  <span class="stepper__dot flex h-7 w-7 items-center justify-center rounded-full border border-slate-700 text-xs font-semibold">3</span>
+                  <div>
+                    <strong>Como integrar</strong>
+                    <p class="text-muted text-sm text-slate-400">Escolha o melhor caminho</p>
+                  </div>
+                </div>
+                <div class="stepper__item flex items-center gap-3 text-slate-300" data-step="4">
+                  <span class="stepper__dot flex h-7 w-7 items-center justify-center rounded-full border border-slate-700 text-xs font-semibold">4</span>
+                  <div>
+                    <strong>Ir para o dashboard</strong>
+                    <p class="text-muted text-sm text-slate-400">Ação do dia pronta</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <section class="card rounded-3xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-indigo-500/10">
+          <div class="step-panel is-active" data-step-panel="1">
+            <h2 class="text-2xl font-semibold text-white">Passo 1: Cadastro</h2>
+            <p class="subtitle text-slate-300">Teste grátis por 14 dias. Sem cartão.</p>
+            <form class="form-grid mt-6 grid gap-4" id="signupForm">
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Nome completo
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="nome" name="nome" type="text" required placeholder="João Silva" />
+              </label>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Email profissional
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="email" name="email" type="email" required placeholder="joao@empresa.com" />
+              </label>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Empresa / Marca (opcional)
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="empresa" name="empresa" type="text" placeholder="Minha Empresa" />
+              </label>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                WhatsApp (opcional)
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="telefone" name="telefone" type="tel" placeholder="(11) 98765-4321" />
+              </label>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Senha
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="password" name="password" type="password" required minlength="10" placeholder="Mínimo 10 caracteres" />
+              </label>
+              <button class="btn btn--block w-full rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-400" type="submit" id="submitBtn">Criar conta</button>
+            </form>
+            <form class="form-grid mt-6 grid gap-4" id="loginForm" style="display: none;">
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Email
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="login_email" name="login_email" type="email" placeholder="seu@email.com" required />
+              </label>
+              <label class="grid gap-2 text-sm font-semibold text-slate-200">
+                Senha
+                <input class="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none" id="login_password" name="login_password" type="password" placeholder="Sua senha" required />
+              </label>
+              <button class="btn btn--block w-full rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-400" type="submit" id="loginBtn">Entrar</button>
+            </form>
+            <div class="step-actions mt-5 flex flex-wrap gap-3">
+              <a class="link-toggle text-sm font-semibold text-indigo-300 hover:text-indigo-200" id="toggleLogin" href="#login" data-mode="signup">Entrar</a>
+            </div>
+            <div class="alert mt-4 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-200" id="loading" style="display: none;">Processando...</div>
+            <div class="alert alert--success mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200" id="success" style="display: none;"></div>
+            <div class="alert alert--error mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200" id="error" style="display: none;"></div>
+          </div>
+
+          <div class="step-panel" data-step-panel="2">
+            <h2 class="text-2xl font-semibold text-white">Passo 2: Sua API Key</h2>
+            <p class="subtitle text-slate-300">Guarde sua API Key para integrar o LeadRank.</p>
+            <div class="api-key mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+              <span id="apiKeyValue">—</span>
+              <button class="btn btn--ghost btn--small rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500" type="button" id="copyApiKey" onclick="navigator.clipboard?.writeText(document.getElementById('apiKeyValue').textContent || '')">Copiar</button>
+            </div>
+            <div class="step-actions mt-5 flex flex-wrap gap-3">
+              <button class="btn rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-400" type="button" id="toIntegrations">Continuar</button>
+            </div>
+            <div class="step-message alert mt-4 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-200" id="seedMessage" style="display: none;"></div>
+          </div>
+
+          <div class="step-panel" data-step-panel="3">
+            <h2 class="text-2xl font-semibold text-white">Passo 3: Como integrar</h2>
+            <p class="subtitle text-slate-300">Use sua API Key e conecte seus canais.</p>
+            <div class="integration-list mt-6 grid gap-4">
+              <div class="integration-item rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+                <strong>Endpoint /prever</strong>
+                <code class="mt-2 block text-xs text-slate-300">POST https://qualificador-leads-ia.onrender.com/prever</code>
+              </div>
+              <div class="integration-item rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+                <strong>Headers</strong>
+                <code class="mt-2 block text-xs text-slate-300">X-API-KEY: sua-chave</code>
+                <code class="mt-1 block text-xs text-slate-300">X-CLIENT-ID: seu-workspace</code>
+              </div>
+            </div>
+            <div class="step-actions mt-5 flex flex-wrap gap-3">
+              <button class="btn btn--ghost rounded-full border border-slate-700 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500" type="button" id="seedFive">Gerar 5 leads de teste</button>
+              <button class="btn rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-400" type="button" id="toFinish">Ir para o passo final</button>
+            </div>
+            <div class="step-message alert mt-4 rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-200" id="seedFiveMsg" style="display: none;"></div>
+          </div>
+
+          <div class="step-panel" data-step-panel="4" id="final">
+            <h2 class="text-2xl font-semibold text-white">Pronto! Vá para o dashboard</h2>
+            <p class="subtitle text-slate-300">Sua conta está configurada e a Ação do Dia está pronta para você.</p>
+            <a class="btn btn--block mt-6 inline-flex w-full items-center justify-center rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-400" id="goDashboard" href="acao.html">Ir para Ação do Dia</a>
+          </div>
+        </section>
+          </div>
+
+          <aside class="space-y-6 rounded-3xl border border-slate-800 bg-gradient-to-br from-indigo-500/20 via-slate-900 to-slate-950 p-6 shadow-xl shadow-indigo-500/10">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">O que você recebe</p>
+              <h2 class="mt-2 text-2xl font-semibold text-white">Onboarding guiado com especialistas</h2>
+              <p class="mt-3 text-sm text-slate-300">
+                Em cada etapa você verá instruções, exemplos prontos e checklist de integração.
+              </p>
+            </div>
+            <div class="grid gap-4">
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                <p class="text-sm font-semibold text-white">Checklist de integração</p>
+                <p class="text-xs text-slate-400">Webhooks, CRM, WhatsApp e importação CSV.</p>
+              </div>
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                <p class="text-sm font-semibold text-white">Templates prontos</p>
+                <p class="text-xs text-slate-400">Mensagens de follow-up e playbooks de SDR.</p>
+              </div>
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                <p class="text-sm font-semibold text-white">Especialista dedicado</p>
+                <p class="text-xs text-slate-400">Plano de migração e benchmark do seu funil.</p>
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+              <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Tempo estimado</p>
+              <p class="mt-2 text-lg font-semibold text-white">15 minutos para o primeiro ranking</p>
+              <p class="text-xs text-slate-400">Canais conectados + API Key gerada.</p>
+            </div>
+            <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/50">
+              <img
+                src="assets/dashboard-mock.svg"
+                alt="Exemplo do dashboard LeadRank"
+                class="w-full object-cover"
+              />
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div data-include="site-footer"></div>
+  </div>
+
+  <script src="partials/site-shell.js"></script>
+  <script>
+    const backendMeta = document.querySelector('meta[name="backend-url"]');
+    const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+
+    const panels = document.querySelectorAll("[data-step-panel]");
+    const stepperItems = document.querySelectorAll(".stepper__item");
+    const toggleLogin = document.getElementById("toggleLogin");
+    const signupForm = document.getElementById("signupForm");
+    const loginForm = document.getElementById("loginForm");
+    const submitBtn = document.getElementById("submitBtn");
+    const loginBtn = document.getElementById("loginBtn");
+    const loading = document.getElementById("loading");
+    const successDiv = document.getElementById("success");
+    const errorDiv = document.getElementById("error");
+    const apiKeyValue = document.getElementById("apiKeyValue");
+    const copyApiKeyBtn = document.getElementById("copyApiKey");
+    const seedMessage = document.getElementById("seedMessage");
+    const seedFiveBtn = document.getElementById("seedFive");
+    const seedFiveMsg = document.getElementById("seedFiveMsg");
+    const goDashboard = document.getElementById("goDashboard");
+
+    let currentStep = 1;
+    let authState = { clientId: "", apiKey: "" };
+
+    const qs = (key) => new URLSearchParams(location.search).get(key) || "";
+
+    function setStep(step) {
+      currentStep = step;
+      panels.forEach((panel) => {
+        panel.classList.toggle("is-active", Number(panel.dataset.stepPanel) === step);
+      });
+      stepperItems.forEach((item) => {
+        item.classList.toggle("is-active", Number(item.dataset.step) === step);
+      });
+    }
+
+    function showError(message) {
+      errorDiv.textContent = message;
+      errorDiv.style.display = "block";
+    }
+
+    function setAuth(clientId, apiKey) {
+      authState = { clientId, apiKey };
+      if (clientId) {
+        localStorage.setItem("leadrank_client_id", clientId);
+        localStorage.setItem("client_id", clientId);
+        localStorage.setItem("LR_CLIENT_ID", clientId);
+      }
+      if (apiKey) {
+        localStorage.setItem("leadrank_api_key", apiKey);
+        localStorage.setItem("api_key", apiKey);
+        localStorage.setItem("LR_API_KEY", apiKey);
+      }
+      apiKeyValue.textContent = apiKey || "—";
+      goDashboard.href = "acao.html";
+    }
+
+    async function seedLeads(count, messageTarget) {
+      if (!authState.clientId || !authState.apiKey) return;
+      try {
+        const res = await fetch(BACKEND + "/seed_test_leads", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-KEY": authState.apiKey,
+            "X-CLIENT-ID": authState.clientId,
+          },
+          body: JSON.stringify({ client_id: authState.clientId, n: count }),
+        });
+        if (!res.ok) throw new Error("Falha ao gerar leads");
+        if (messageTarget) {
+          messageTarget.className = "alert alert--success";
+          messageTarget.textContent = "Leads de teste enviados! Veja agora na Ação do Dia";
+          messageTarget.style.display = "block";
+        }
+      } catch (err) {
+        if (messageTarget) {
+          messageTarget.className = "alert alert--error";
+          messageTarget.textContent = "Não foi possível enviar leads de teste.";
+          messageTarget.style.display = "block";
+        }
+      }
+    }
+
+    function toggleToLogin() {
+      signupForm.style.display = "none";
+      loginForm.style.display = "grid";
+      toggleLogin.textContent = "Criar conta";
+      toggleLogin.dataset.mode = "login";
+    }
+
+    function toggleToSignup() {
+      signupForm.style.display = "grid";
+      loginForm.style.display = "none";
+      toggleLogin.textContent = "Entrar";
+      toggleLogin.dataset.mode = "signup";
+    }
+
+    if (toggleLogin) {
+      toggleLogin.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (toggleLogin.dataset.mode === "login") {
+          toggleToSignup();
+        } else {
+          toggleToLogin();
+        }
+      });
+    }
+
+    const toIntegrations = document.getElementById("toIntegrations");
+    if (toIntegrations) {
+      toIntegrations.addEventListener("click", () => setStep(3));
+    }
+
+    const toFinish = document.getElementById("toFinish");
+    if (toFinish) {
+      toFinish.addEventListener("click", () => setStep(4));
+    }
+
+    if (goDashboard) {
+      goDashboard.addEventListener("click", () => {
+        window.location.href = goDashboard.href;
+      });
+    }
+
+    if (copyApiKeyBtn) {
+      copyApiKeyBtn.addEventListener("click", () => {
+        if (!authState.apiKey) return;
+        navigator.clipboard?.writeText(authState.apiKey);
+        copyApiKeyBtn.textContent = "Copiado!";
+        setTimeout(() => (copyApiKeyBtn.textContent = "Copiar"), 1600);
+      });
+    }
+
+    if (seedFiveBtn) {
+      seedFiveBtn.addEventListener("click", async () => {
+        if (seedFiveMsg) seedFiveMsg.style.display = "none";
+        await seedLeads(5, seedFiveMsg);
+      });
+    }
+
+    if (loginForm) {
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const email = document.getElementById("login_email").value.trim().toLowerCase();
+        const password = document.getElementById("login_password").value.trim();
+
+        if (!email || !password) {
+          showError("Email e senha são obrigatórios");
+          return;
+        }
+
+        loginBtn.disabled = true;
+        loading.style.display = "block";
+        errorDiv.style.display = "none";
+        successDiv.style.display = "none";
+
+        try {
+          const res = await fetch(BACKEND + "/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            throw new Error(data.error || data.message || "Erro no login");
+          }
+
+          const apiKeyHeader = res.headers.get("X-API-KEY") || "";
+          setAuth(data.client_id, apiKeyHeader);
+          successDiv.innerHTML = `<span class="icon-button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Login feito!</span>`;
+          successDiv.style.display = "block";
+          setStep(4);
+        } catch (err) {
+          showError(err.message || "Erro de conexão. Tente novamente.");
+        } finally {
+          loginBtn.disabled = false;
+          loading.style.display = "none";
+        }
+      });
+    }
+
+    if (signupForm) {
+      signupForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const nome = document.getElementById("nome").value.trim();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const empresa = document.getElementById("empresa").value.trim();
+      const telefone = document.getElementById("telefone").value.trim();
+      const password = document.getElementById("password").value.trim();
+
+      if (!nome || !email) {
+        showError("Nome e email são obrigatórios");
+        return;
+      }
+      if (!password || password.length < 10) {
+        showError("A senha deve ter pelo menos 10 caracteres.");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      loading.style.display = "block";
+      errorDiv.style.display = "none";
+      successDiv.style.display = "none";
+
+      try {
+        const res = await fetch(BACKEND + "/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nome, email, empresa, telefone, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          throw new Error(data.error || data.message || "Erro ao criar conta");
+        }
+
+        const apiKeyHeader = res.headers.get("X-API-KEY") || "";
+        setAuth(data.client_id, apiKeyHeader);
+        successDiv.innerHTML = `<span class="icon-button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Conta criada! Gerando sua API Key...</span>`;
+        successDiv.style.display = "block";
+
+        await seedLeads(10, seedMessage);
+        setStep(2);
+      } catch (err) {
+        showError(err.message || "Erro de conexão. Tente novamente.");
+      } finally {
+        submitBtn.disabled = false;
+        loading.style.display = "none";
+      }
+      });
+    }
+
+    if (qs("mode") === "login") {
+      toggleToLogin();
+    }
+  </script>
+</body>
+</html>

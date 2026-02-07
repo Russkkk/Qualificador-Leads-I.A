@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeadRank - Qualificador de Leads com IA</title>
+  <meta name="description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+  <meta property="og:title" content="LeadRank - Qualificador de Leads com IA">
+  <meta property="og:description" content="Priorize leads quentes automaticamente e aumente suas vendas. Teste grátis 14 dias.">
+  <meta property="og:image" content="assets/og-image.svg">
+  <meta property="og:url" content="https://leadrank.com.br/">
+  <meta name="theme-color" content="#4f7cff">
+  <link rel="icon" href="assets/favicon.svg">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-active-nav="pricing">
+  <template id="header-actions-template">
+    <a class="btn btn--ghost" href="index.html">Início</a>
+    <a class="btn" href="onboarding.html">Testar grátis</a>
+  </template>
+  <div class="page">
+    <div data-include="site-header"></div>
+
+    <main>
+      <section class="pricing">
+        <p class="eyebrow">Planos flexíveis para cada fase</p>
+        <h1>Escolha o plano ideal para a sua capacidade de leads</h1>
+        <p class="subtitle">
+          Comece no trial e evolua conforme a operação cresce. Todos os planos incluem a Ação do Dia e priorização diária.
+        </p>
+
+        <section class="cta" aria-label="Teste grátis">
+          <div>
+            <h2>Teste grátis 14 dias sem cartão</h2>
+            <p class="subtitle">Crie sua conta e valide o ranking de leads sem compromisso.</p>
+          </div>
+          <a class="btn" href="onboarding.html">Começar teste grátis</a>
+        </section>
+
+        <div class="pricing__grid" id="pricingGrid">
+          <article class="card" data-plan="pro">
+            <span class="pricing__tag">Pro</span>
+            <div class="pricing__price">R$ 179 / mês</div>
+            <p class="pricing__capacity">Até 3.000 leads / mês</p>
+            <p class="subtitle">Escala com suporte prioritário e relatórios.</p>
+            <ul class="pricing__list">
+              <li>Ranking diário</li>
+              <li>Suporte prioritário</li>
+              <li>Relatórios avançados</li>
+            </ul>
+            <a class="btn btn--block" href="https://pay.kiwify.com.br/xBAB8TZ" target="_blank" rel="noreferrer">
+              Assinar Pro
+            </a>
+            <p class="pricing__microcopy">Pro</p>
+          </article>
+          <article class="card" data-plan="enterprise">
+            <span class="pricing__tag">Enterprise</span>
+            <div class="pricing__price">Sob consulta</div>
+            <p class="pricing__capacity">Volume personalizado</p>
+            <p class="subtitle">Plano para grandes operações com SLA dedicado.</p>
+            <ul class="pricing__list">
+              <li>Onboarding assistido</li>
+              <li>Integrações customizadas</li>
+              <li>SLA dedicado</li>
+            </ul>
+            
+            <a class="btn btn--secondary btn--block" href="index.html?intent=enterprise#contato" data-intent="enterprise">
+              Falar com Vendas
+            </a>
+
+            <p class="pricing__microcopy">Enterprise</p>
+          </article>
+        </div>
+
+        <div class="pricing__info card card--soft" id="comparison">
+          <h2>Comparação de planos</h2>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Funcionalidade</th>
+                  <th>Free</th>
+                  <th>Starter</th>
+                  <th>Pro</th>
+                  <th>Enterprise</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Ação do Dia diária</td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Disponível</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Disponível</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Disponível</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Disponível</span></td>
+                </tr>
+                <tr>
+                  <td>Capacidade de leads</td>
+                  <td>100</td>
+                  <td>1.000</td>
+                  <td>3.000</td>
+                  <td>Personalizado</td>
+                </tr>
+                <tr>
+                  <td>IA com feedback contínuo</td>
+                  <td>—</td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                </tr>
+                <tr>
+                  <td>Suporte prioritário</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                </tr>
+                <tr>
+                  <td>Integrações avançadas</td>
+                  <td>—</td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                  <td><span class="icon-button pricing__check"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Incluído</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pricing__info card card--soft" id="faq">
+          <h2>Dúvidas frequentes</h2>
+          <div class="features__grid">
+            <article class="feature">
+              <h3>Preciso de cartão para testar?</h3>
+              <p>Não. O teste é gratuito por 14 dias e você pode cancelar quando quiser.</p>
+            </article>
+            <article class="feature">
+              <h3>Posso mudar de plano depois?</h3>
+              <p>Sim. Você pode fazer upgrade ou downgrade a qualquer momento.</p>
+            </article>
+            <article class="feature">
+              <h3>Como funciona o limite de leads?</h3>
+              <p>O limite é mensal e você pode aumentar sua capacidade a qualquer momento.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div data-include="site-footer"></div>
+  </div>
+
+  <script src="partials/site-shell.js"></script>
+  <script>
+    const BACKEND = (window.BACKEND_URL || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+    const KIWIFY_LINKS = {
+      pro: "https://pay.kiwify.com.br/xBAB8TZ",
+      enterprise: "index.html?intent=enterprise#contato"
+    };
+    const PRICING_ICONS = {
+      star: `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.1L22 9.2l-5 4.9 1.2 7L12 17.8 5.8 21.1 7 14.1 2 9.2l7.1-1.1L12 2z"/></svg>`
+    };
+
+    const fallbackPlans = [
+      {
+        id: "free",
+        name: "Free",
+        price: "R$ 0",
+        period: "",
+        capacity: "Até 100 leads / mês",
+        description: "Ideal para testar a priorização com poucos leads.",
+        tag: "Free",
+        features: ["100 leads/mês", "Ação do Dia", "Ranking diário"],
+        cta: "Começar grátis",
+        href: "onboarding.html"
+      },
+      {
+        id: "starter",
+        name: "Starter",
+        price: "R$ 79",
+        period: "/ mês",
+        capacity: "Até 1.000 leads / mês",
+        description: "Para times pequenos que precisam de consistência.",
+        tag: "Mais escolhido",
+        features: ["Tudo do Free", "Feedback contínuo", "Integrações"],
+        cta: "Assinar Starter",
+        href: "onboarding.html"
+      },
+      {
+        id: "pro",
+        name: "Pro",
+        price: "R$ 179",
+        period: "/ mês",
+        capacity: "Até 3.000 leads / mês",
+        description: "Para quem quer escala com suporte prioritário.",
+        tag: `${PRICING_ICONS.star} Recomendado`,
+        featured: true,
+        features: ["Tudo do Starter", "Suporte prioritário", "Relatórios avançados"],
+        cta: "Assinar Pro",
+        href: KIWIFY_LINKS.pro
+      },
+      {
+        id: "enterprise",
+        name: "Enterprise",
+        price: "Sob consulta",
+        period: "",
+        capacity: "Volume personalizado",
+        description: "Projetos com alto volume e integrações customizadas.",
+        tag: "Enterprise",
+        features: ["SLA dedicado", "Onboarding assistido", "Customizações"],
+        cta: "Falar com vendas",
+        href: KIWIFY_LINKS.enterprise
+      }
+    ];
+
+    function alignPlanLinks(plans) {
+      plans.forEach((plan) => {
+        const name = (plan.name || "").toLowerCase();
+        const tag = (plan.tag || "").toLowerCase();
+        const cta = (plan.cta || "").toLowerCase();
+
+        if (name.includes("pro") || tag.includes("pro") || cta.includes("assinar pro")) {
+          plan.href = KIWIFY_LINKS.pro;
+          plan.cta = plan.cta || "Assinar Pro";
+          return;
+        }
+
+        if (name.includes("enterprise") || tag.includes("enterprise") || cta.includes("falar com vendas")) {
+          plan.href = KIWIFY_LINKS.enterprise;
+          plan.cta = plan.cta || "Falar com vendas";
+        }
+      });
+
+      return plans;
+    }
+
+    function normalizePlans(data) {
+      if (!data) return alignPlanLinks(fallbackPlans.map((plan) => ({ ...plan })));
+      let rawPlans = [];
+      if (Array.isArray(data)) {
+        rawPlans = data;
+      } else if (Array.isArray(data.plans)) {
+        rawPlans = data.plans;
+      } else if (data.plans && typeof data.plans === "object") {
+        rawPlans = Object.entries(data.plans).map(([id, meta]) => ({ id, ...(meta || {}) }));
+      } else if (Array.isArray(data.data)) {
+        rawPlans = data.data;
+      } else if (data.data && typeof data.data === "object") {
+        rawPlans = Object.entries(data.data).map(([id, meta]) => ({ id, ...(meta || {}) }));
+      }
+
+      if (!rawPlans.length) return alignPlanLinks(fallbackPlans.map((plan) => ({ ...plan })));
+
+      const normalized = rawPlans.map((plan) => {
+        const name = plan.name || plan.nome || "Plano";
+        const id = (plan.id || plan.slug || name).toString().toLowerCase();
+        const priceValue = plan.price || plan.preco || plan.price_value || "";
+        const price = priceValue ? `R$ ${priceValue}` : plan.price_label || "R$ 0";
+        const period = plan.period || plan.periodo || "/ mês";
+        const capacity = plan.capacity || plan.capacidade || "";
+        const description = plan.description || plan.descricao || "";
+        const features = plan.features || plan.itens || [];
+        const fallback = fallbackPlans.find((item) => item.id === id) || {};
+
+        return {
+          id,
+          name,
+          price: price || fallback.price,
+          period: period || fallback.period,
+          capacity: capacity || fallback.capacity,
+          description: description || fallback.description,
+          tag: plan.tag || fallback.tag,
+          featured: plan.featured || fallback.featured,
+          features: features.length ? features : fallback.features,
+          cta: plan.cta || fallback.cta,
+          href: plan.href || fallback.href || "onboarding.html"
+        };
+      });
+      return alignPlanLinks(normalized);
+    }
+
+    function buildCard(plan) {
+      const card = document.createElement("article");
+      card.className = `card${plan.featured ? " card--featured" : ""}`;
+      card.dataset.plan = plan.id;
+
+      const tag = plan.tag ? `<span class="pricing__tag${plan.featured ? " pricing__tag--highlight" : ""}">${plan.tag}</span>` : "";
+      const features = (plan.features || []).map((item) => `<li>${item}</li>`).join("");
+      const priceLabel = `${plan.price}${plan.period ? ` ${plan.period}` : ""}`;
+
+      card.innerHTML = `
+        ${tag}
+        <div class="pricing__price">${priceLabel}</div>
+        <p class="pricing__capacity">${plan.capacity || ""}</p>
+        <p class="subtitle">${plan.description || ""}</p>
+        <ul class="pricing__list">${features}</ul>
+        <a class="btn btn--block ${plan.featured ? "" : "btn--ghost"}" href="${plan.href}">${plan.cta || "Assinar"}</a>
+        <p class="pricing__microcopy">${plan.name}</p>
+      `;
+
+      return card;
+    }
+
+    async function renderPricing() {
+      const grid = document.getElementById("pricingGrid");
+      if (!grid) return;
+
+      grid.innerHTML = "";
+      try {
+        const res = await fetch(`${BACKEND}/pricing`);
+        const data = await res.json().catch(() => ({}));
+        const plans = normalizePlans(data);
+        plans.forEach((plan) => grid.appendChild(buildCard(plan)));
+      } catch (error) {
+        const plans = alignPlanLinks(fallbackPlans.map((plan) => ({ ...plan })));
+        plans.forEach((plan) => grid.appendChild(buildCard(plan)));
+      }
+    }
+
+    renderPricing();
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LeadRank">
+  <rect width="1200" height="630" fill="#0b1124"/>
+  <rect x="80" y="80" width="1040" height="470" rx="32" fill="#101a3a" stroke="#243167" stroke-width="4"/>
+  <circle cx="180" cy="160" r="48" fill="#4f7cff"/>
+  <text x="180" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#ffffff">LR</text>
+  <text x="260" y="175" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff">LeadRank</text>
+  <text x="260" y="235" font-family="Arial, sans-serif" font-size="26" fill="#cbd5f5">Qualifique seus leads com IA em segundos</text>
+  <rect x="260" y="300" width="420" height="90" rx="16" fill="#4f7cff"/>
+  <text x="470" y="356" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#ffffff">Ação do Dia pronta</text>
+</svg>
