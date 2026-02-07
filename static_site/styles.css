@@ -62,14 +62,27 @@ a {
   text-decoration: none;
 }
 
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 a:focus-visible,
 button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid rgba(110, 231, 255, 0.8);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(79, 124, 255, 0.2);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+}
+
+
+#lead-capture,
+#contato {
+  scroll-margin-top: 96px;
 }
 
 .page {
@@ -165,6 +178,7 @@ body[data-theme="light"] .site-header {
 
 .btn:hover {
   transform: translateY(-2px);
+  text-decoration: none;
 }
 
 .btn--secondary {
@@ -1462,6 +1476,8 @@ main {
   background: var(--primary);
   font-size: 1.4rem;
   box-shadow: 0 12px 30px rgba(79, 124, 255, 0.45);
+}
+
 .video-frame {
   position: relative;
   padding-top: 56.25%;
