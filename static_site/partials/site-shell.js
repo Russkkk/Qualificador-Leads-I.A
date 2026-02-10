@@ -59,22 +59,37 @@ const applyTheme = (theme) => {
 
 const scrollToContatoIfNeeded = () => {
   const params = new URLSearchParams(window.location.search || "");
-  const shouldScroll = window.location.hash === "#contato" || params.get("intent") === "enterprise";
-  if (!shouldScroll) return;
+  const intent = params.get("intent");
 
-  const anchor = document.getElementById("contato");
-  if (!anchor) return;
+  // Mantém compatibilidade com links antigos (#contato), mas quando houver intenção
+  // de migração/enterprise direciona para o formulário (próximo passo claro).
+  const targetId = intent === "enterprise"
+    ? "lead-capture"
+    : window.location.hash === "#contato"
+      ? "contato"
+      : "";
+
+  if (!targetId) return;
+
+  const target = document.getElementById(targetId);
+  if (!target) return;
 
   // Aguarda layout estabilizar e o header sticky ser renderizado
   setTimeout(() => {
-    anchor.scrollIntoView({ behavior: "smooth", block: "start" });
-    const leadForm = document.getElementById("leadForm");
-    const firstField = leadForm ? leadForm.querySelector("input, textarea, select") : null;
-    if (firstField) {
-      firstField.focus({ preventScroll: true });
-    } else {
-      anchor.focus?.({ preventScroll: true });
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    if (targetId === "lead-capture") {
+      const leadForm = document.getElementById("leadForm");
+      const firstField = leadForm ? leadForm.querySelector("input, textarea, select") : null;
+      firstField?.focus({ preventScroll: true });
+      return;
     }
+
+    // Para outros anchors, tenta focar o próprio alvo para ajudar navegação via teclado.
+    if (!target.hasAttribute("tabindex")) {
+      target.setAttribute("tabindex", "-1");
+    }
+    target.focus?.({ preventScroll: true });
   }, 60);
 };
 

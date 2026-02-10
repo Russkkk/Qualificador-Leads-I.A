@@ -7,6 +7,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        index: resolve(__dirname, "index.html"),
         acao: resolve(__dirname, "acao.html"),
         onboarding: resolve(__dirname, "onboarding.html")
       }

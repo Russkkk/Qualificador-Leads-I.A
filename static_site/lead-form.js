@@ -44,6 +44,46 @@ const serializeForm = (form) => {
   return data;
 };
 
+let lastTrackedLeadKey = "";
+
+const trackLeadConversion = ({ email = "", clientId = "" } = {}) => {
+  const key = `${String(email).trim().toLowerCase()}::${String(clientId)}`;
+  if (!key || key === lastTrackedLeadKey) return;
+
+  const payload = {
+    event: "Lead",
+    lead_email: String(email).trim().toLowerCase(),
+    client_id: String(clientId),
+    source: "landing_form",
+  };
+
+  if (typeof window.gtag === "function") {
+    window.gtag("event", "Lead", payload);
+  }
+
+  if (typeof window.fbq === "function") {
+    window.fbq("track", "Lead", payload);
+  }
+
+  if (Array.isArray(window.dataLayer)) {
+    window.dataLayer.push(payload);
+  }
+
+  lastTrackedLeadKey = key;
+};
+
+const showThankYouState = (tempPassword) => {
+  if (!leadForm) return;
+  leadForm.innerHTML = `
+    <div class="space-y-3" role="status" aria-live="polite">
+      <p class="text-sm font-semibold text-emerald-300">Obrigado! Seu cadastro foi concluído.</p>
+      <p class="text-sm text-slate-200">Conta trial criada com sucesso. Senha temporária: <strong>${tempPassword}</strong>.</p>
+      <p class="text-xs text-slate-400">Você também pode seguir para o onboarding para finalizar a configuração.</p>
+      <a class="btn btn--block" href="onboarding.html" aria-label="Ir para onboarding após criar conta">Continuar para onboarding</a>
+    </div>
+  `;
+};
+
 if (leadForm) {
   leadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -88,11 +128,9 @@ if (leadForm) {
       }
       localStorage.setItem("leadrank_temp_password", tempPassword);
 
+      trackLeadConversion({ email: payload.email || "", clientId });
       leadForm.reset();
-      showStatus(
-        `Conta criada! Senha temporária: ${tempPassword}. Acesse o onboarding para continuar.`,
-        "success"
-      );
+      showThankYouState(tempPassword);
     } catch (error) {
       saveLeadLocally(serializeForm(leadForm));
       showStatus(
