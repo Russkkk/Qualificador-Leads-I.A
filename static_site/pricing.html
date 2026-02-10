@@ -64,7 +64,7 @@
               <li>SLA dedicado</li>
             </ul>
             
-            <a class="btn btn--secondary btn--block" href="index.html?intent=enterprise#contato" data-intent="enterprise" aria-label="Falar com vendas sobre migração e plano Enterprise">
+            <a class="btn btn--secondary btn--block" href="index.html?intent=enterprise#lead-capture" data-intent="enterprise" aria-label="Falar com vendas sobre migração e plano Enterprise">
               Falar com Vendas
             </a>
 
@@ -153,8 +153,9 @@
   <script>
     const BACKEND = (window.BACKEND_URL || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
     const KIWIFY_LINKS = {
+      starter: "https://pay.kiwify.com.br/Vq17ohp",
       pro: "https://pay.kiwify.com.br/xBAB8TZ",
-      enterprise: "index.html?intent=enterprise#contato"
+      enterprise: "index.html?intent=enterprise#lead-capture"
     };
     const PRICING_ICONS = {
       star: `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.1L22 9.2l-5 4.9 1.2 7L12 17.8 5.8 21.1 7 14.1 2 9.2l7.1-1.1L12 2z"/></svg>`
@@ -183,7 +184,7 @@
         tag: "Mais escolhido",
         features: ["Tudo do Free", "Feedback contínuo", "Integrações"],
         cta: "Assinar Starter",
-        href: "onboarding.html"
+        href: KIWIFY_LINKS.starter
       },
       {
         id: "pro",
@@ -217,6 +218,19 @@
         const name = (plan.name || "").toLowerCase();
         const tag = (plan.tag || "").toLowerCase();
         const cta = (plan.cta || "").toLowerCase();
+
+        if (
+          name.includes("starter") ||
+          name.includes("standard") ||
+          name.includes("stander") ||
+          tag.includes("starter") ||
+          tag.includes("standard") ||
+          cta.includes("assinar starter")
+        ) {
+          plan.href = KIWIFY_LINKS.starter;
+          plan.cta = plan.cta || "Assinar Starter";
+          return;
+        }
 
         if (name.includes("pro") || tag.includes("pro") || cta.includes("assinar pro")) {
           plan.href = KIWIFY_LINKS.pro;
@@ -287,13 +301,16 @@
       const features = (plan.features || []).map((item) => `<li>${item}</li>`).join("");
       const priceLabel = `${plan.price}${plan.period ? ` ${plan.period}` : ""}`;
 
+      const isCheckoutLink = typeof plan.href === "string" && plan.href.startsWith("https://pay.kiwify.com.br/");
+      const linkAttrs = isCheckoutLink ? ' target="_blank" rel="noreferrer"' : "";
+
       card.innerHTML = `
         ${tag}
         <div class="pricing__price">${priceLabel}</div>
         <p class="pricing__capacity">${plan.capacity || ""}</p>
         <p class="subtitle">${plan.description || ""}</p>
         <ul class="pricing__list">${features}</ul>
-        <a class="btn btn--block ${plan.featured ? "" : "btn--ghost"}" href="${plan.href}">${plan.cta || "Assinar"}</a>
+        <a class="btn btn--block ${plan.featured ? "" : "btn--ghost"}" href="${plan.href}"${linkAttrs}>${plan.cta || "Assinar"}</a>
         <p class="pricing__microcopy">${plan.name}</p>
       `;
 

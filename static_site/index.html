@@ -184,6 +184,7 @@
           <img
             src="assets/dashboard-mock.svg"
             alt="Mock do dashboard com ranking de leads"
+            onerror="this.onerror=null;this.src='assets/dashboard-mock-fallback.svg';"
             class="w-full object-cover"
           />
         </div>
@@ -285,11 +286,7 @@
           <p class="mt-2 text-sm text-slate-200">
             Receba um plano de migração em 48h, com checklist técnico e cronograma.
           </p>
-<<<<<<< HEAD
           <a class="btn btn--secondary mt-4 inline-flex items-center gap-2" href="#lead-capture" role="button" data-intent="enterprise" aria-label="Ir para o formulário e falar sobre migração para plano pago do LeadRank">
-=======
-          <a class="btn btn--secondary mt-4 inline-flex items-center gap-2" href="#contato" role="button" data-intent="enterprise" aria-label="Falar sobre migração para plano pago do LeadRank">
->>>>>>> 6c1d8a39129e788307976f0b64dbe50bc0843c2f
             Falar sobre migração
             <span class="inline-flex items-center justify-center rounded-full border border-white/20 p-1"><i data-lucide="arrow-up-right" class="h-3.5 w-3.5" aria-hidden="true"></i></span>
           </a>
@@ -303,7 +300,7 @@
         <div class="space-y-4">
           <h2 class="text-3xl font-semibold text-white">Pronto para priorizar leads quentes com IA?</h2>
           <p class="text-slate-300">
-            Receba acesso ao teste grátis e ao checklist de integração de forma imediata.
+            Receba acesso ao teste grátis e ao checklist de integração em até 24 horas úteis.
           </p>
           <ul class="space-y-3 text-sm text-slate-200">
             <li class="flex items-center gap-2">
@@ -357,11 +354,11 @@
             />
           </label>
           <button class="btn btn--block" type="submit">
-            Criar conta automática
+            Solicitar acesso ao teste grátis
           </button>
           <div id="formStatus" class="form-status text-xs text-slate-400" role="status" aria-live="polite"></div>
           <p class="text-xs text-slate-400">
-            Criaremos sua conta trial instantaneamente e enviaremos acesso para o seu e-mail.
+            Enviaremos o acesso para o seu e-mail em até 24 horas úteis (normalmente antes disso).
           </p>
         </form>
       </section>
@@ -392,7 +389,6 @@
           if (!target) return false;
           target.scrollIntoView({ behavior: "smooth", block: "start" });
 
-<<<<<<< HEAD
           window.setTimeout(() => {
             if (targetId === "lead-capture") {
               const firstField = target.querySelector("input, select, textarea, button");
@@ -414,19 +410,6 @@
             }
             target.focus?.({ preventScroll: true });
           }, 350);
-=======
-          if (targetId === "lead-capture") {
-            window.setTimeout(() => {
-              const firstField = target.querySelector("input, select, textarea, button");
-              if (!firstField) return;
-              if (!firstField.hasAttribute("tabindex")) {
-                firstField.focus({ preventScroll: true });
-                return;
-              }
-              firstField.focus();
-            }, 350);
-          }
->>>>>>> 6c1d8a39129e788307976f0b64dbe50bc0843c2f
 
           return true;
         };

@@ -1,0 +1,6 @@
+<svg width="960" height="540" viewBox="0 0 960 540" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Prévia do dashboard indisponível">
+  <rect width="960" height="540" rx="28" fill="#0F172A"/>
+  <rect x="36" y="32" width="888" height="476" rx="20" fill="#111827" stroke="#1E293B" stroke-width="2"/>
+  <text x="480" y="268" text-anchor="middle" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#E2E8F0">Prévia do dashboard</text>
+  <text x="480" y="304" text-anchor="middle" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="18" fill="#94A3B8">indisponível no momento</text>
+</svg>
