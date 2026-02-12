@@ -46,6 +46,56 @@ def _prever_limit() -> str:
     return prever_rate_limit(get_client_id_from_request())
 
 
+@leads_bp.get("/prever_example")
+def prever_example():
+    """Return an official example payload for the /prever endpoint.
+
+    Supports:
+      - /prever_example?format=lead  -> {"lead": {...}}
+      - /prever_example?format=root  -> {...}
+
+    Safe, unauthenticated, placeholders only.
+    """
+
+    fmt = (request.args.get("format") or "lead").strip().lower()
+    if fmt not in ["lead", "root"]:
+        return json_err("format inválido", 400, allowed=["lead", "root"])
+
+    lead_obj = {
+        "nome": "João da Silva",
+        "email": "joao@empresa.com",
+        "telefone": "11999999999",
+        "origem": "site",
+        "tempo_site": 185,
+        "paginas_visitadas": 4,
+        "clicou_preco": 1,
+    }
+
+    example = {"lead": lead_obj} if fmt == "lead" else lead_obj
+
+    notes = {
+        "headers_required": {
+            "X-API-KEY": "SUA_API_KEY",
+            "X-CLIENT-ID": "SEU_WORKSPACE",
+        },
+        "accepted_fields": [
+            "nome" if fmt == "root" else "lead.nome",
+            "email" if fmt == "root" else "lead.email",
+            "telefone" if fmt == "root" else "lead.telefone",
+            "origem" if fmt == "root" else "lead.origem",
+            "tempo_site" if fmt == "root" else "lead.tempo_site",
+            "paginas_visitadas" if fmt == "root" else "lead.paginas_visitadas",
+            "clicou_preco" if fmt == "root" else "lead.clicou_preco",
+        ],
+        "format": fmt,
+        "allowed_formats": ["lead", "root"],
+        "tip": "Você pode alternar o exemplo via /prever_example?format=lead|root.",
+    }
+
+    return json_ok({"example": example, "notes": notes})
+
+
+
 @leads_bp.post("/criar_cliente")
 def criar_cliente():
     data = request.get_json(silent=True) or {}

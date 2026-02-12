@@ -2,6 +2,7 @@ const leadForm = document.getElementById("leadForm");
 const formStatus = document.getElementById("formStatus");
 const backendMeta = document.querySelector('meta[name="backend-url"]');
 const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+const THANK_YOU_URL = "obrigado.html";
 
 if (window.lucide) {
   window.lucide.createIcons();
@@ -44,32 +45,24 @@ const serializeForm = (form) => {
   return data;
 };
 
-let lastTrackedLeadKey = "";
-
-const trackLeadConversion = ({ email = "", clientId = "" } = {}) => {
-  const key = `${String(email).trim().toLowerCase()}::${String(clientId)}`;
-  if (!key || key === lastTrackedLeadKey) return;
-
+// A conversão (Lead) é disparada apenas na página de Obrigado (um único lugar),
+// via site-shell.js. Aqui só gravamos um payload "pending" e redirecionamos.
+const setPendingLeadConversion = ({ email = "", clientId = "" } = {}) => {
   const payload = {
-    event: "Lead",
-    lead_email: String(email).trim().toLowerCase(),
-    client_id: String(clientId),
+    email: String(email).trim().toLowerCase(),
+    client_id: String(clientId).trim(),
     source: "landing_form",
+    submitted_at: new Date().toISOString(),
   };
 
-  if (typeof window.gtag === "function") {
-    window.gtag("event", "Lead", payload);
+  if (window.LeadrankTracking?.setPendingLeadConversion) {
+    window.LeadrankTracking.setPendingLeadConversion(payload);
+    return;
   }
 
-  if (typeof window.fbq === "function") {
-    window.fbq("track", "Lead", payload);
-  }
-
-  if (Array.isArray(window.dataLayer)) {
-    window.dataLayer.push(payload);
-  }
-
-  lastTrackedLeadKey = key;
+  try {
+    localStorage.setItem("leadrank_lead_pending", JSON.stringify(payload));
+  } catch (_) {}
 };
 
 const showThankYouState = (tempPassword) => {
@@ -128,9 +121,21 @@ if (leadForm) {
       }
       localStorage.setItem("leadrank_temp_password", tempPassword);
 
-      trackLeadConversion({ email: payload.email || "", clientId });
+      // Para mostrar dados na página de Obrigado.
+      localStorage.setItem("leadrank_last_lead_email", String(payload.email || "").trim());
+
+      setPendingLeadConversion({ email: payload.email || "", clientId });
+
       leadForm.reset();
-      showThankYouState(tempPassword);
+      showStatus("Cadastro concluído. Redirecionando...", "success");
+
+      try {
+        window.location.assign(THANK_YOU_URL);
+        return;
+      } catch (_) {
+        // Fallback (caso raro): mantém o estado na própria página.
+        showThankYouState(tempPassword);
+      }
     } catch (error) {
       saveLeadLocally(serializeForm(leadForm));
       showStatus(

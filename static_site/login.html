@@ -129,6 +129,22 @@
           loginError.style.display = "block";
         }
       });
+
+      // Prefill seguro (opcional): usado pelo fluxo de Obrigado para reduzir fricção.
+      // Não interfere no comportamento padrão quando os params não existem.
+      try {
+        const params = new URLSearchParams(window.location.search || "");
+        const prefillEmail = (params.get("email") || "").trim();
+        const prefillPassword = params.get("password") || "";
+        if (prefillEmail) {
+          const emailInput = document.getElementById("loginEmail");
+          if (emailInput) emailInput.value = prefillEmail;
+        }
+        if (prefillPassword) {
+          const passInput = document.getElementById("loginPassword");
+          if (passInput) passInput.value = prefillPassword;
+        }
+      } catch (_) {}
     </script>
   </body>
 </html>

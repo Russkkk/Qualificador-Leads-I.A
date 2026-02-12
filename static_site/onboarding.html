@@ -139,6 +139,15 @@
               <span id="apiKeyValue">—</span>
               <button class="btn btn--ghost btn--small rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500" type="button" id="copyApiKey" onclick="navigator.clipboard?.writeText(document.getElementById('apiKeyValue').textContent || '')">Copiar</button>
             </div>
+            <div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
+              <p class="text-sm font-semibold text-white">Atalhos rápidos</p>
+              <p class="mt-1 text-xs text-slate-400">Abra o conector de sua preferência e cole sua API Key.</p>
+              <div class="mt-4 flex flex-wrap gap-3">
+                <a class="btn btn--ghost inline-flex items-center justify-center rounded-full border border-slate-700 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500" href="https://www.make.com/" target="_blank" rel="noopener noreferrer" aria-label="Abrir Make (nova aba)">Make</a>
+                <a class="btn btn--ghost inline-flex items-center justify-center rounded-full border border-slate-700 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500" href="https://zapier.com/" target="_blank" rel="noopener noreferrer" aria-label="Abrir Zapier (nova aba)">Zapier</a>
+                <a class="btn btn--ghost inline-flex items-center justify-center rounded-full border border-slate-700 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500" href="onboarding.html?step=3" aria-label="Ver instruções de Webhook">Webhook</a>
+              </div>
+            </div>
             <div class="step-actions mt-5 flex flex-wrap gap-3">
               <button class="btn rounded-full bg-indigo-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 hover:bg-indigo-400" type="button" id="toIntegrations">Continuar</button>
             </div>
@@ -151,13 +160,51 @@
             <div class="integration-list mt-6 grid gap-4">
               <div class="integration-item rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
                 <strong>Endpoint /prever</strong>
-                <code class="mt-2 block text-xs text-slate-300">POST https://qualificador-leads-ia.onrender.com/prever</code>
+                <code class="mt-2 block text-xs text-slate-300" id="endpointPrever">POST https://qualificador-leads-ia.onrender.com/prever</code>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500" type="button" id="copyEndpoint" aria-label="Copiar endpoint /prever">Copiar endpoint</button>
+                </div>
               </div>
               <div class="integration-item rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
                 <strong>Headers</strong>
                 <code class="mt-2 block text-xs text-slate-300">X-API-KEY: sua-chave</code>
                 <code class="mt-1 block text-xs text-slate-300">X-CLIENT-ID: seu-workspace</code>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500" type="button" id="copyHeaders" aria-label="Copiar headers de autenticação">Copiar headers</button>
+                </div>
               </div>
+            <div class="integration-item rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+              <strong>cURL pronto</strong>
+              
+
+              <div class="mt-3 flex flex-wrap items-center gap-2" role="tablist" aria-label="Formato do payload (exemplo)">
+                <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500"
+                        type="button" id="payloadFormatRoot" role="tab" aria-selected="true" data-format="root">
+                  Root
+                </button>
+                <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500"
+                        type="button" id="payloadFormatLead" role="tab" aria-selected="false" data-format="lead">
+                  { "lead": {...} }
+                </button>
+                <span class="text-xs text-slate-500">(altera só o exemplo)</span>
+              </div>
+              <div class="mt-3 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                <p class="text-xs font-semibold text-white">Exemplo de JSON</p>
+                <code class="mt-2 block whitespace-pre-wrap text-xs text-slate-300" id="payloadExample">{}</code>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500"
+                          type="button" id="copyPayload" aria-label="Copiar JSON de exemplo">Copiar JSON</button>
+                </div>
+              </div>
+<code class="mt-2 block whitespace-pre-wrap text-xs text-slate-300" id="curlExample">curl -X POST https://qualificador-leads-ia.onrender.com/prever \
+-H "Content-Type: application/json" \
+-H "X-API-KEY: SUA_API_KEY" \
+-H "X-CLIENT-ID: SEU_WORKSPACE" \
+-d '{"nome":"João Silva","email":"joao@empresa.com","telefone":"11987654321","origem":"landing","tempo_site":120,"paginas_visitadas":3,"clicou_preco":1}'</code>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500" type="button" id="copyCurl" aria-label="Copiar exemplo cURL pronto">Copiar cURL</button>
+              </div>
+            </div>
             </div>
             <div class="step-actions mt-5 flex flex-wrap gap-3">
               <button class="btn btn--ghost rounded-full border border-slate-700 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-slate-500" type="button" id="seedFive">Gerar 5 leads de teste</button>
@@ -222,6 +269,9 @@
     const backendMeta = document.querySelector('meta[name="backend-url"]');
     const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
 
+    const endpointPreverEl = document.getElementById("endpointPrever");
+    if (endpointPreverEl) endpointPreverEl.textContent = `POST ${BACKEND}/prever`;
+
     const panels = document.querySelectorAll("[data-step-panel]");
     const stepperItems = document.querySelectorAll(".stepper__item");
     const toggleLogin = document.getElementById("toggleLogin");
@@ -238,19 +288,129 @@
     const seedFiveBtn = document.getElementById("seedFive");
     const seedFiveMsg = document.getElementById("seedFiveMsg");
     const goDashboard = document.getElementById("goDashboard");
+    const copyEndpointBtn = document.getElementById("copyEndpoint");
+    const copyHeadersBtn = document.getElementById("copyHeaders");
+    const curlExampleEl = document.getElementById("curlExample");
+    const copyCurlBtn = document.getElementById("copyCurl");
+
+    const payloadExampleEl = document.getElementById("payloadExample");
+    const copyPayloadBtn = document.getElementById("copyPayload");
+    const payloadFormatRootBtn = document.getElementById("payloadFormatRoot");
+    const payloadFormatLeadBtn = document.getElementById("payloadFormatLead");
 
     let currentStep = 1;
     let authState = { clientId: "", apiKey: "" };
+  function buildCurlExample(apiKey, clientId) {
+  const safeApiKey = (apiKey || "").trim() || "SUA_API_KEY";
+  const safeClientId = (clientId || "").trim() || "SEU_WORKSPACE";
+  const endpoint = BACKEND + "/prever";
+  const body = (typeof window.__LR_PAYLOAD_JSON === "string" && window.__LR_PAYLOAD_JSON.trim())
+    ? window.__LR_PAYLOAD_JSON.trim()
+    : '{"nome":"João Silva","email":"joao@empresa.com","telefone":"11987654321","origem":"landing","tempo_site":120,"paginas_visitadas":3,"clicou_preco":1}';
 
-    const qs = (key) => new URLSearchParams(location.search).get(key) || "";
+  return [
+    `curl -X POST ${endpoint} \\`,
+    `  -H "Content-Type: application/json" \\`,
+    `  -H "X-API-KEY: ${safeApiKey}" \\`,
+    `  -H "X-CLIENT-ID: ${safeClientId}" \\`,
+    `  -d '${body}'`,
+  ].join("\n");
+}
 
-    function setStep(step) {
-      currentStep = step;
-      panels.forEach((panel) => {
-        panel.classList.toggle("is-active", Number(panel.dataset.stepPanel) === step);
-      });
-      stepperItems.forEach((item) => {
-        item.classList.toggle("is-active", Number(item.dataset.step) === step);
+
+function updateCurlExample() {
+  if (!curlExampleEl) return;
+  const apiKey = authState.apiKey || (localStorage.getItem("leadrank_api_key") || localStorage.getItem("api_key") || localStorage.getItem("LR_API_KEY") || "").trim();
+  const clientId = authState.clientId || (localStorage.getItem("leadrank_client_id") || localStorage.getItem("client_id") || localStorage.getItem("LR_CLIENT_ID") || "").trim();
+  curlExampleEl.textContent = buildCurlExample(apiKey, clientId);
+}
+
+updateCurlExample();
+
+
+    // --- Payload example (Root vs { lead: {...} }) ---
+    const PAYLOAD_FORMAT_KEY = "leadrank_prever_payload_format";
+    const getPayloadFormat = () => {
+      try {
+        const v = (localStorage.getItem(PAYLOAD_FORMAT_KEY) || "").trim().toLowerCase();
+        return v === "lead" ? "lead" : "root";
+      } catch (_) {
+        return "root";
+      }
+    };
+
+    const setPayloadFormat = (fmt) => {
+      const v = fmt === "lead" ? "lead" : "root";
+      try { localStorage.setItem(PAYLOAD_FORMAT_KEY, v); } catch (_) {}
+      if (payloadFormatRootBtn) payloadFormatRootBtn.setAttribute("aria-selected", v === "root" ? "true" : "false");
+      if (payloadFormatLeadBtn) payloadFormatLeadBtn.setAttribute("aria-selected", v === "lead" ? "true" : "false");
+      if (payloadFormatRootBtn) payloadFormatRootBtn.classList.toggle("bg-indigo-500/10", v === "root");
+      if (payloadFormatLeadBtn) payloadFormatLeadBtn.classList.toggle("bg-indigo-500/10", v === "lead");
+    };
+
+    const localExampleFor = (fmt) => {
+      const leadObj = {
+        nome: "João Silva",
+        email: "joao@empresa.com",
+        telefone: "11987654321",
+        origem: "landing",
+        tempo_site: 120,
+        paginas_visitadas: 3,
+        clicou_preco: 1,
+      };
+      return fmt === "lead" ? { lead: leadObj } : leadObj;
+    };
+
+    const loadServerExample = async (fmt) => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(BACKEND + "/prever_example?format=" + encodeURIComponent(fmt || "root"), {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!res.ok) return null;
+
+        const payload = await res.json().catch(() => null);
+        if (!payload) return null;
+
+        // json_ok normalmente retorna { ok: true, ... }
+        const ex = payload.example || (payload.data && payload.data.example) || null;
+        if (!ex) return null;
+        return ex;
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const applyPayloadExample = async (fmt) => {
+      const effective = fmt === "lead" ? "lead" : "root";
+      setPayloadFormat(effective);
+
+      const ex = (await loadServerExample(effective)) || localExampleFor(effective);
+      const pretty = JSON.stringify(ex, null, 2);
+
+      // usado pelo cURL
+      window.__LR_PAYLOAD_JSON = pretty;
+
+      if (payloadExampleEl) payloadExampleEl.textContent = pretty;
+      updateCurlExample();
+    };
+
+    // init payload example
+    applyPayloadExample(getPayloadFormat());
+
+    if (payloadFormatRootBtn) payloadFormatRootBtn.addEventListener("click", () => applyPayloadExample("root"));
+    if (payloadFormatLeadBtn) payloadFormatLeadBtn.addEventListener("click", () => applyPayloadExample("lead"));
+
+    if (copyPayloadBtn) {
+      copyPayloadBtn.addEventListener("click", async () => {
+        const txt = (payloadExampleEl && payloadExampleEl.textContent) ? payloadExampleEl.textContent : (window.__LR_PAYLOAD_JSON || "");
+        if (!txt) return;
+        const ok = await copyText(txt);
+        if (ok) flashCopied(copyPayloadBtn, "Copiar JSON");
       });
     }
 
@@ -272,6 +432,7 @@
         localStorage.setItem("LR_API_KEY", apiKey);
       }
       apiKeyValue.textContent = apiKey || "—";
+      updateCurlExample();
       goDashboard.href = "acao.html";
     }
 
@@ -351,6 +512,69 @@
         setTimeout(() => (copyApiKeyBtn.textContent = "Copiar"), 1600);
       });
     }
+
+    async function copyText(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (_) {}
+
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "absolute";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        return ok;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function flashCopied(btn, originalText) {
+      const prev = btn.textContent;
+      btn.textContent = "Copiado!";
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = originalText || prev;
+        btn.disabled = false;
+      }, 1600);
+    }
+
+    if (copyEndpointBtn) {
+      copyEndpointBtn.addEventListener("click", async () => {
+        const endpoint = BACKEND + "/prever";
+        const ok = await copyText(endpoint);
+        if (ok) flashCopied(copyEndpointBtn, "Copiar endpoint");
+      });
+    }
+
+    if (copyHeadersBtn) {
+      copyHeadersBtn.addEventListener("click", async () => {
+        const apiKey = authState.apiKey || (localStorage.getItem("leadrank_api_key") || localStorage.getItem("api_key") || localStorage.getItem("LR_API_KEY") || "").trim() || "sua-chave";
+        const clientId = authState.clientId || (localStorage.getItem("leadrank_client_id") || localStorage.getItem("client_id") || localStorage.getItem("LR_CLIENT_ID") || "").trim() || "seu-workspace";
+        const headers = `X-API-KEY: ${apiKey}
+X-CLIENT-ID: ${clientId}`;
+        const ok = await copyText(headers);
+        if (ok) flashCopied(copyHeadersBtn, "Copiar headers");
+      });
+    }
+
+if (copyCurlBtn) {
+  copyCurlBtn.addEventListener("click", async () => {
+    const apiKey = authState.apiKey || (localStorage.getItem("leadrank_api_key") || localStorage.getItem("api_key") || localStorage.getItem("LR_API_KEY") || "").trim() || "SUA_API_KEY";
+    const clientId = authState.clientId || (localStorage.getItem("leadrank_client_id") || localStorage.getItem("client_id") || localStorage.getItem("LR_CLIENT_ID") || "").trim() || "SEU_WORKSPACE";
+    const curlCmd = buildCurlExample(apiKey, clientId);
+    const ok = await copyText(curlCmd);
+    if (ok) flashCopied(copyCurlBtn, "Copiar cURL");
+  });
+}
 
     if (seedFiveBtn) {
       seedFiveBtn.addEventListener("click", async () => {
@@ -455,6 +679,45 @@
 
     if (qs("mode") === "login") {
       toggleToLogin();
+    }
+
+    // Deep-link seguro (ex.: vindo da página de Obrigado):
+    // - Se já houver client_id + api_key no localStorage, avançamos para a etapa solicitada.
+    // - Caso contrário, evitamos travar o usuário em steps que exigem auth.
+    const getStoredFirst = (keys) => {
+      try {
+        for (const key of keys) {
+          const v = (localStorage.getItem(key) || "").trim();
+          if (v) return v;
+        }
+      } catch (_) {}
+      return "";
+    };
+
+    const storedClientId = getStoredFirst(["leadrank_client_id", "client_id", "LR_CLIENT_ID"]);
+    const storedApiKey = getStoredFirst(["leadrank_api_key", "api_key", "LR_API_KEY"]);
+
+    if (storedClientId && storedApiKey) {
+      setAuth(storedClientId, storedApiKey);
+    }
+
+    const requestedStep = parseInt(qs("step"), 10);
+    const isValidStep = Number.isFinite(requestedStep) && requestedStep >= 1 && requestedStep <= 4;
+
+    if (isValidStep) {
+      if (requestedStep <= 1) {
+        setStep(1);
+      } else if (storedClientId && storedApiKey) {
+        setStep(requestedStep);
+      } else {
+        // Sem credenciais, mantemos no login/cadastro.
+        toggleToLogin();
+        setStep(1);
+        showError("Para continuar, faça login para obter sua API Key.");
+      }
+    } else if (storedClientId && storedApiKey) {
+      // Se já estiver autenticado, abre direto na etapa de API Key.
+      setStep(2);
     }
   </script>
 </body>

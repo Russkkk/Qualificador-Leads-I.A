@@ -44,6 +44,254 @@ const ICONS = {
 
 const THEME_KEY = "leadrank_theme";
 
+// --- Attribution (UTM / click ids) ---
+// Mantém rastreamento de origem sem depender de libs externas. Usado para:
+// 1) anexar UTMs em links de checkout (Kiwify)
+// 2) enriquecer eventos de tracking (gtag/fbq/datalayer) quando existirem
+const ATTR_LAST_KEY = "leadrank_attr_last";
+const ATTR_FIRST_KEY = "leadrank_attr_first";
+const ATTR_FIELDS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "gclid",
+  "fbclid",
+  "ttclid",
+  "msclkid",
+];
+
+const safeLocalStorageGet = (key) => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (_) {
+    return null;
+  }
+};
+
+const safeLocalStorageSet = (key, value) => {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
+const readJson = (raw) => {
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const captureAttributionFromUrl = () => {
+  let params;
+  try {
+    params = new URLSearchParams(window.location.search || "");
+  } catch (_) {
+    return;
+  }
+
+  const incoming = {};
+  let hasAny = false;
+  ATTR_FIELDS.forEach((field) => {
+    const value = (params.get(field) || "").trim();
+    if (!value) return;
+    incoming[field] = value;
+    hasAny = true;
+  });
+
+  // Também guarda contexto (página/referrer) para facilitar auditoria.
+  if (hasAny) {
+    incoming.landing_path = `${window.location.pathname}${window.location.search}${window.location.hash || ""}`;
+    incoming.referrer = document.referrer || "";
+    incoming.captured_at = new Date().toISOString();
+  }
+
+  if (!hasAny) return;
+
+  const lastStored = readJson(safeLocalStorageGet(ATTR_LAST_KEY)) || {};
+  const nextLast = { ...lastStored, ...incoming };
+  safeLocalStorageSet(ATTR_LAST_KEY, JSON.stringify(nextLast));
+
+  // First-touch: só grava se ainda não existir.
+  const firstStored = safeLocalStorageGet(ATTR_FIRST_KEY);
+  if (!firstStored) {
+    safeLocalStorageSet(ATTR_FIRST_KEY, JSON.stringify(nextLast));
+  }
+};
+
+const getAttribution = () => {
+  return readJson(safeLocalStorageGet(ATTR_LAST_KEY)) || {};
+};
+
+const decorateCheckoutUrl = (href) => {
+  if (typeof href !== "string" || !href) return href;
+  let url;
+  try {
+    url = new URL(href, window.location.href);
+  } catch (_) {
+    return href;
+  }
+
+  // Só anexamos UTMs em checkout Kiwify.
+  if (!/pay\.kiwify\.com\.br/i.test(url.hostname)) return href;
+
+  const attr = getAttribution();
+  ATTR_FIELDS.forEach((field) => {
+    const value = (attr[field] || "").toString().trim();
+    if (!value) return;
+    if (!url.searchParams.get(field)) {
+      url.searchParams.set(field, value);
+    }
+  });
+  return url.toString();
+};
+
+let lastTrackedCheckoutKey = "";
+
+const trackCheckoutClick = ({ planId = "", planName = "", href = "" } = {}) => {
+  const key = `${planId}::${planName}::${href}`;
+  if (!key || key === lastTrackedCheckoutKey) return;
+
+  const attr = getAttribution();
+  const payload = {
+    event: "begin_checkout",
+    plan_id: planId,
+    plan_name: planName,
+    destination: href,
+    ...ATTR_FIELDS.reduce((acc, field) => {
+      if (attr[field]) acc[field] = attr[field];
+      return acc;
+    }, {}),
+  };
+
+  if (typeof window.gtag === "function") {
+    window.gtag("event", "begin_checkout", payload);
+  }
+  if (typeof window.fbq === "function") {
+    window.fbq("track", "InitiateCheckout", payload);
+  }
+  if (Array.isArray(window.dataLayer)) {
+    window.dataLayer.push(payload);
+  }
+
+  lastTrackedCheckoutKey = key;
+};
+
+const bindCheckoutLinks = () => {
+  // Delegação para cobrir cards gerados dinamicamente (ex.: pricing.html).
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const link = target.closest("a[href]");
+    if (!link) return;
+    const href = link.getAttribute("href") || "";
+    if (!href) return;
+
+    let absoluteHref = href;
+    try {
+      absoluteHref = new URL(href, window.location.href).toString();
+    } catch (_) {}
+
+    if (!/pay\.kiwify\.com\.br/i.test(absoluteHref)) return;
+
+    const container = link.closest("[data-plan]");
+    const planId = (container?.getAttribute("data-plan") || "").trim();
+    const planName = (container?.querySelector(".pricing__microcopy")?.textContent || link.textContent || "")
+      .trim();
+
+    const decorated = decorateCheckoutUrl(absoluteHref);
+    if (decorated && decorated !== absoluteHref) {
+      // Atualiza o href antes de navegar.
+      link.setAttribute("href", decorated);
+    }
+
+    trackCheckoutClick({ planId, planName, href: decorated || absoluteHref });
+  });
+};
+
+// --- Lead Conversion (Obrigado page) ---
+// Para garantir disparo de conversão em um único lugar, gravamos um payload "pending"
+// no submit do formulário e processamos o evento apenas na página de Obrigado.
+const LEAD_PENDING_KEY = "leadrank_lead_pending";
+const LEAD_TRACKED_KEY = "leadrank_lead_tracked_key";
+
+const setPendingLeadConversion = (data) => {
+  if (!data) return;
+  safeLocalStorageSet(LEAD_PENDING_KEY, JSON.stringify(data));
+};
+
+const readPendingLeadConversion = () => {
+  return readJson(safeLocalStorageGet(LEAD_PENDING_KEY)) || null;
+};
+
+const clearPendingLeadConversion = () => {
+  try {
+    window.localStorage.removeItem(LEAD_PENDING_KEY);
+  } catch (_) {}
+};
+
+const trackLeadConversion = ({ email = "", clientId = "", source = "landing_form" } = {}) => {
+  const key = `${String(email).trim().toLowerCase()}::${String(clientId).trim()}`;
+  if (!key || key === "::") return;
+
+  const lastKey = (safeLocalStorageGet(LEAD_TRACKED_KEY) || "").trim();
+  if (lastKey && lastKey === key) return;
+
+  const attr = getAttribution();
+  const payload = {
+    event: "Lead",
+    lead_email: String(email).trim().toLowerCase(),
+    client_id: String(clientId).trim(),
+    source,
+    ...ATTR_FIELDS.reduce((acc, field) => {
+      if (attr[field]) acc[field] = attr[field];
+      return acc;
+    }, {}),
+  };
+
+  if (typeof window.gtag === "function") {
+    window.gtag("event", "Lead", payload);
+  }
+  if (typeof window.fbq === "function") {
+    window.fbq("track", "Lead", payload);
+  }
+  if (Array.isArray(window.dataLayer)) {
+    window.dataLayer.push(payload);
+  }
+
+  safeLocalStorageSet(LEAD_TRACKED_KEY, key);
+};
+
+const processPendingLeadConversion = () => {
+  const isThankYou =
+    document.body?.dataset?.conversionPage === "lead" ||
+    /\/obrigado\.html$/i.test(window.location.pathname || "");
+  if (!isThankYou) return;
+
+  const pending = readPendingLeadConversion();
+  if (!pending) return;
+
+  trackLeadConversion({
+    email: pending.email || "",
+    clientId: pending.client_id || pending.clientId || "",
+    source: pending.source || "landing_form",
+  });
+  clearPendingLeadConversion();
+};
+
+// Exposição mínima para uso por lead-form.js / obrigado.js (sem dependências externas)
+window.LeadrankTracking = window.LeadrankTracking || {};
+window.LeadrankTracking.setPendingLeadConversion = setPendingLeadConversion;
+window.LeadrankTracking.trackLeadConversion = trackLeadConversion;
+window.LeadrankTracking.getAttribution = getAttribution;
+window.LeadrankTracking.decorateCheckoutUrl = decorateCheckoutUrl;
+
 const resolveInitialTheme = () => {
   const stored = localStorage.getItem(THEME_KEY);
   if (stored === "light" || stored === "dark") return stored;
@@ -138,6 +386,12 @@ applyTheme(resolveInitialTheme());
 
 document.addEventListener("DOMContentLoaded", async () => {
   const activeNav = document.body.dataset.activeNav;
+
+  // Captura UTMs/click-ids e prepara tracking de checkout sem interferir no restante.
+  captureAttributionFromUrl();
+  processPendingLeadConversion();
+  bindCheckoutLinks();
+  processPendingLeadConversion();
 
   try {
     const header = await loadPartial("[data-include='site-header']", "partials/site-header.html");
