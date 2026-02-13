@@ -77,6 +77,10 @@ def get_client_id_from_request() -> str:
     client_id = get_header("X-CLIENT-ID")
     if client_id:
         return client_id
+    # Query string (útil para GETs e downloads).
+    client_id = (request.args.get("client_id") or "").strip()
+    if client_id:
+        return client_id
     data = request.get_json(silent=True) or {}
     client_id = (data.get("client_id") or "").strip()
     if client_id:

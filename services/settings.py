@@ -29,6 +29,20 @@ FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "")
 def _bool(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
+
+def _float(value: str, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _int(value: str, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
 ALLOWED_ORIGINS = [
     "https://qualificador-leads-ia.onrender.com",
     "https://leadrank.com.br",
@@ -72,9 +86,9 @@ DEFAULT_CSP = (
     "img-src 'self' data: https:; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
-    "script-src 'self' https://cdn.jsdelivr.net; "
+    "script-src 'self' https://cdn.jsdelivr.net https://challenges.cloudflare.com; "
     "connect-src 'self' https://qualificador-leads-ia.onrender.com https://leadrank.com.br; "
-    "frame-src https://www.youtube.com"
+    "frame-src https://www.youtube.com https://challenges.cloudflare.com"
 )
 CSP_POLICY = os.getenv("CSP_POLICY", DEFAULT_CSP)
 
@@ -82,3 +96,20 @@ DEFAULT_LIMIT = 200
 DEFAULT_THRESHOLD = 0.35
 MIN_LABELED_TO_TRAIN = 4
 PBKDF2_ITERATIONS = 390_000
+
+# --- Public (front-end) feature flags / anti-abuse ---
+# Demo mode: expõe endpoints read-only com dados de exemplo.
+DEMO_MODE = _bool(os.getenv("DEMO_MODE", ""))
+
+# Captcha (Cloudflare Turnstile): opcional e sem breaking change.
+# - Se TURNSTILE_SECRET_KEY estiver vazio: captcha desativado.
+# - Se CAPTCHA_ENFORCE=true: token passa a ser obrigatório em /signup.
+TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "").strip()
+TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "").strip()
+CAPTCHA_ENFORCE = _bool(os.getenv("CAPTCHA_ENFORCE", ""))
+CAPTCHA_TIMEOUT_SECONDS = _float(os.getenv("CAPTCHA_TIMEOUT_SECONDS", "3"), 3.0)
+CAPTCHA_SOFT_FAIL = _bool(os.getenv("CAPTCHA_SOFT_FAIL", "true"))
+
+# Report de erros do front (opcional). Se ligado, o front pode enviar erros JS para /client_error.
+CLIENT_ERROR_REPORTING = _bool(os.getenv("CLIENT_ERROR_REPORTING", ""))
+CLIENT_ERROR_SAMPLE_RATE = _float(os.getenv("CLIENT_ERROR_SAMPLE_RATE", "0.05"), 0.05)

@@ -97,7 +97,13 @@ def prever_example():
 
 
 @leads_bp.post("/criar_cliente")
+@limiter.limit("30 per minute")
 def criar_cliente():
+    # Endpoint interno/administrativo: protege com DEMO_KEY.
+    ok_demo, msg = require_demo_key()
+    if not ok_demo:
+        return json_err(msg or "Acesso negado", 403, code="forbidden")
+
     data = request.get_json(silent=True) or {}
     client_id = (data.get("client_id") or "").strip()
     plan = (data.get("plan") or "trial").strip().lower()
@@ -627,16 +633,48 @@ def leads_export():
     finally:
         conn.close()
 
-    header = "nome,email,telefone,tempo_site,paginas_visitadas,clicou_preco,probabilidade,score,created_at,virou_cliente\n"
-    lines = [header]
+    # CSV seguro: aplica quoting adequado e mitiga CSV injection (Excel/Sheets).
+    import csv
+    import io
+
+    def csv_safe(value: Any) -> str:
+        s = "" if value is None else str(value)
+        # Protege contra fórmulas maliciosas ao abrir em planilhas.
+        if s.startswith(("=", "+", "-", "@")):
+            return "'" + s
+        return s
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "nome",
+        "email",
+        "telefone",
+        "tempo_site",
+        "paginas_visitadas",
+        "clicou_preco",
+        "probabilidade",
+        "score",
+        "created_at",
+        "virou_cliente",
+    ])
+
     for r in rows:
-        created_at = iso(r.get("created_at")) or ""
-        lines.append(
-            f"{r.get('nome','')},{r.get('email_lead','')},{r.get('telefone','')},{r.get('tempo_site','')},"
-            f"{r.get('paginas_visitadas','')},{r.get('clicou_preco','')},{r.get('probabilidade','')},"
-            f"{r.get('score','')},{created_at},{r.get('virou_cliente','')}\n"
-        )
-    return Response("".join(lines), mimetype="text/csv")
+        writer.writerow([
+            csv_safe(r.get("nome")),
+            csv_safe(r.get("email_lead")),
+            csv_safe(r.get("telefone")),
+            csv_safe(r.get("tempo_site")),
+            csv_safe(r.get("paginas_visitadas")),
+            csv_safe(r.get("clicou_preco")),
+            csv_safe(r.get("probabilidade")),
+            csv_safe(r.get("score")),
+            csv_safe(iso(r.get("created_at")) or ""),
+            csv_safe(r.get("virou_cliente")),
+        ])
+
+    csv_text = buf.getvalue()
+    return Response(csv_text, mimetype="text/csv")
 
 
 @leads_bp.post("/demo_public")
@@ -933,7 +971,8 @@ def acao_do_dia():
                     "temperatura": lead_temperature(item.get("probabilidade"), item.get("score")),
                 }
             )
-        payload = {"client_id": client_id, "rows": res}
+        # Compatibilidade: "rows" é o formato novo; "action_list"/"items" suportam versões antigas do front.
+        payload = {"client_id": client_id, "rows": res, "action_list": res, "items": res}
         cache_set_json(cache_key, payload)
         return json_ok(payload)
     finally:

@@ -4,9 +4,11 @@ import secrets
 from flask import Blueprint, jsonify, request
 from flask_login import login_user
 from psycopg.rows import dict_row
+import structlog
 
 from extensions import limiter
 from models.user import AuthUser
+from services import settings
 from services.auth_service import (
     gen_api_key,
     hash_password,
@@ -14,6 +16,7 @@ from services.auth_service import (
     validate_password_strength,
     verify_password,
 )
+from services.captcha import verify_turnstile
 from services.db import db
 from services.utils import iso, json_err, json_ok, month_key, now_utc
 
@@ -29,6 +32,33 @@ def signup():
     empresa = (data.get("empresa") or "").strip()
     telefone = (data.get("telefone") or "").strip()
     password = (data.get("password") or data.get("senha") or "").strip()
+
+    # Honeypot (anti-bot): bots costumam preencher campos invisíveis.
+    # Safe: não afeta usuários reais; não cria conta quando acionado.
+    honeypot = (data.get("company_site") or data.get("website") or "").strip()
+    if honeypot:
+        return jsonify({"ok": True, "success": True, "message": "Conta trial criada com sucesso!"})
+
+    # Captcha (Cloudflare Turnstile) - opcional.
+    # - Em modo enforce, exige token válido.
+    # - Em modo soft, tenta validar quando presente, mas não bloqueia por instabilidade.
+    captcha_token = (
+        data.get("captcha_token")
+        or data.get("cf_turnstile_response")
+        or data.get("cf-turnstile-response")
+        or data.get("cf_turnstile")
+        or ""
+    )
+    if (settings.TURNSTILE_SECRET_KEY and settings.CAPTCHA_ENFORCE) and not str(captcha_token or "").strip():
+        return json_err("Confirme que você não é um robô.", 400, code="captcha_required")
+
+    if settings.TURNSTILE_SECRET_KEY and str(captcha_token or "").strip():
+        remote = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+        res = verify_turnstile(str(captcha_token), remoteip=remote)
+        if not res.ok and settings.CAPTCHA_ENFORCE:
+            return json_err("Falha na verificação anti-spam. Tente novamente.", 400, code="captcha_invalid")
+        if not res.ok:
+            structlog.get_logger().warning("captcha_soft_fail", reason=res.error)
 
     if not email or "@" not in email:
         return json_err("Email válido é obrigatório", 400)
