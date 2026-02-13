@@ -48,7 +48,7 @@
       <div data-include="site-header"></div>
 
       <main class="mx-auto w-full max-w-5xl px-6 pb-16">
-      <h1 class="sr-only">LeadRank | Qualificador de Leads com IA</h1>
+      <p class="sr-only">LeadRank | Qualificador de Leads com IA</p>
       <section class="relative grid gap-10 pb-16 pt-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div class="space-y-6">
           <span class="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200">
@@ -56,9 +56,8 @@
             IA + dados para vender mais rápido
           </span>
           <h1 class="text-4xl font-bold tracking-tight text-white md:text-5xl" aria-label="LeadRank | Qualificador de Leads com IA">
-          <h2 class="text-4xl font-bold tracking-tight text-white md:text-5xl">
             Transforme novos leads em reuniões em poucas horas.
-          </h2>
+          </h1>
           <p class="text-base text-slate-200 md:text-lg">
             O LeadRank prioriza automaticamente quem está pronto para comprar, entrega a Ação do Dia e
             mantém seu time focado no que gera receita.
@@ -300,7 +299,7 @@
         <div class="space-y-4">
           <h2 class="text-3xl font-semibold text-white">Pronto para priorizar leads quentes com IA?</h2>
           <p class="text-slate-300">
-            Receba acesso ao teste grátis e ao checklist de integração em até 24 horas úteis.
+            Acesso imediato ao teste grátis e ao checklist de integração (sem cartão).
           </p>
           <ul class="space-y-3 text-sm text-slate-200">
             <li class="flex items-center gap-2">
@@ -353,12 +352,27 @@
               required
             />
           </label>
+
+          <!-- Honeypot anti-bot (invisível para humanos) -->
+          <label style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+            Site da empresa
+            <input type="text" name="company_site" tabindex="-1" autocomplete="off" />
+          </label>
+
+          <!-- Captcha opcional (Turnstile) - renderizado via site-shell.js quando habilitado no servidor -->
+          <div class="mt-2" data-captcha-slot hidden aria-hidden="true"></div>
+
           <button class="btn btn--block" type="submit">
             Solicitar acesso ao teste grátis
           </button>
           <div id="formStatus" class="form-status text-xs text-slate-400" role="status" aria-live="polite"></div>
+
           <p class="text-xs text-slate-400">
-            Enviaremos o acesso para o seu e-mail em até 24 horas úteis (normalmente antes disso).
+            Ao enviar, você concorda com os <a class="underline hover:text-slate-200" href="termos.html">Termos de Uso</a> e a
+            <a class="underline hover:text-slate-200" href="privacidade.html">Política de Privacidade</a>.
+          </p>
+          <p class="text-xs text-slate-400">
+            Acesso imediato após enviar. Você também recebe o checklist de integração por e-mail.
           </p>
         </form>
       </section>
@@ -380,6 +394,16 @@
     </div>
 
     <script src="https://unpkg.com/lucide@latest"></script>
+<script id="lucide-fallback">
+  (function(){
+    if (window.lucide) return;
+    var s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js";
+    s.defer = true;
+    s.onload = function(){ try{ window.lucide && window.lucide.createIcons(); }catch(_){ } };
+    document.head.appendChild(s);
+  })();
+</script>
     <script type="module" src="partials/site-shell.js"></script>
     <script src="lead-form.js"></script>
     <script>

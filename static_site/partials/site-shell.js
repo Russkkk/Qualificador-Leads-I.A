@@ -15,6 +15,160 @@ const loadPartial = async (selector, partialPath) => {
   return target;
 };
 
+// --- Back-end base URL (para flags públicas, captcha e report de erro do front) ---
+const backendMeta = document.querySelector('meta[name="backend-url"]');
+const BACKEND = (window.BACKEND_URL || backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 2500) => {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { ...options, signal: controller.signal });
+    return resp;
+  } finally {
+    clearTimeout(t);
+  }
+};
+
+const loadPublicConfig = async () => {
+  try {
+    const resp = await fetchWithTimeout(`${BACKEND}/public_config`, { method: "GET" }, 2500);
+    if (!resp.ok) return null;
+    const data = await resp.json().catch(() => null);
+    if (!data || data.ok !== true) return null;
+    window.LEADRANK_PUBLIC_CONFIG = data;
+    return data;
+  } catch (_) {
+    return null;
+  }
+};
+
+const applyFeatureFlags = (config) => {
+  const demoEnabled = Boolean(config?.features?.demo);
+  document.querySelectorAll('[data-feature="demo"]').forEach((el) => {
+    if (demoEnabled) {
+      el.hidden = false;
+      el.classList.remove("hidden");
+      el.removeAttribute("aria-hidden");
+    } else {
+      el.hidden = true;
+      el.classList.add("hidden");
+      el.setAttribute("aria-hidden", "true");
+    }
+  });
+};
+
+// --- Captcha (Cloudflare Turnstile) ---
+let _turnstileScriptPromise = null;
+
+const loadTurnstileScript = () => {
+  if (_turnstileScriptPromise) return _turnstileScriptPromise;
+  _turnstileScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-turnstile]');
+    if (existing) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.setAttribute("data-turnstile", "1");
+    script.onload = () => resolve(true);
+    script.onerror = () => reject(new Error("turnstile_load_failed"));
+    document.head.appendChild(script);
+  });
+  return _turnstileScriptPromise;
+};
+
+const initTurnstile = async (config) => {
+  const captcha = config?.captcha || {};
+  const siteKey = String(captcha.site_key || "").trim();
+  const mode = String(captcha.mode || "off").trim();
+  if (!siteKey || mode === "off") return;
+
+  const slots = Array.from(document.querySelectorAll("[data-captcha-slot]"));
+  if (!slots.length) return;
+
+  try {
+    await loadTurnstileScript();
+  } catch (_) {
+    return; // falha silenciosa (não quebra form)
+  }
+
+  // Renderiza em todos os slots encontrados (ex.: landing form, onboarding)
+  slots.forEach((slot) => {
+    if (!(slot instanceof HTMLElement)) return;
+    if (slot.dataset.rendered === "1") return;
+    slot.dataset.rendered = "1";
+    slot.hidden = false;
+    slot.classList.remove("hidden");
+
+    // Turnstile expõe o token via callback; mantemos em window para o lead-form.js anexar.
+    const onSuccess = (token) => {
+      window.__LEADRANK_CAPTCHA_TOKEN = String(token || "");
+    };
+    const onExpire = () => {
+      window.__LEADRANK_CAPTCHA_TOKEN = "";
+    };
+
+    try {
+      if (window.turnstile && typeof window.turnstile.render === "function") {
+        window.turnstile.render(slot, {
+          sitekey: siteKey,
+          callback: onSuccess,
+          "expired-callback": onExpire,
+          theme: "dark",
+        });
+      } else {
+        // Caso raro: script carregou mas objeto ainda não está pronto.
+        slot.textContent = "";
+      }
+    } catch (_) {
+      // não quebra a página
+    }
+  });
+};
+
+// --- Client error reporting (opcional) ---
+const bindClientErrorReporting = (config) => {
+  const enabled = Boolean(config?.features?.client_error_reporting);
+  if (!enabled) return;
+  const sampleRate = Number(config?.client_error_sample_rate ?? 0.05);
+
+  const shouldSend = () => {
+    const r = Math.random();
+    return r < (isNaN(sampleRate) ? 0.05 : sampleRate);
+  };
+
+  const send = (payload) => {
+    if (!shouldSend()) return;
+    fetch(`${BACKEND}/client_error`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        page: window.location.href,
+      }),
+    }).catch(() => {});
+  };
+
+  window.addEventListener("error", (event) => {
+    send({
+      message: String(event?.message || "error"),
+      stack: String(event?.error?.stack || ""),
+    });
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    send({
+      message: String(reason?.message || reason || "unhandledrejection"),
+      stack: String(reason?.stack || ""),
+    });
+  });
+};
+
 const applyActiveNav = (root, activeNav) => {
   if (!root || !activeNav) {
     return;
@@ -393,11 +547,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindCheckoutLinks();
   processPendingLeadConversion();
 
+  // Flags públicas (demo, captcha...) - best effort.
+  const publicConfig = await loadPublicConfig();
+
   try {
     const header = await loadPartial("[data-include='site-header']", "partials/site-header.html");
     applyActiveNav(header, activeNav);
     applyHeaderActions(header);
     applyThemeToggle(header);
+
+    if (publicConfig) {
+      applyFeatureFlags(publicConfig);
+      bindClientErrorReporting(publicConfig);
+      initTurnstile(publicConfig);
+    }
+
     document.dispatchEvent(new CustomEvent("site-shell:header-ready"));
     bindIntentLinks();
     scrollToContatoIfNeeded();

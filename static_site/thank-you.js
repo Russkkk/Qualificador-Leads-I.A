@@ -1,10 +1,17 @@
 (() => {
   const get = (key) => {
     try {
-      return window.localStorage.getItem(key) || "";
+      // Preferência: sessionStorage (menos exposição) e fallback para localStorage (compat.).
+      return window.sessionStorage.getItem(key) || window.localStorage.getItem(key) || "";
     } catch (_) {
       return "";
     }
+  };
+
+  const clearSession = (key) => {
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch (_) {}
   };
 
   const getFirstAvailable = (keys) => {
@@ -144,6 +151,8 @@ const setListItems = (listEl, items) => {
       }
       setText("thankYouEmail", email || "(não informado)");
       setText("thankYouTempPassword", tempPassword || "(gerada após cadastro)");
+      // Limpa a senha temporária da sessão após renderizar.
+      if (tempPassword) clearSession("leadrank_temp_password");
     }
 
     // CTA inteligente: evita levar o usuário para um caminho que o deixe travado.
@@ -180,8 +189,8 @@ return;
     // Sem auth completa: direciona para login para garantir client_id + api_key.
     const next = encodeURIComponent("onboarding.html?step=2");
     const emailParam = email ? `&email=${encodeURIComponent(email)}` : "";
-    const passParam = tempPassword ? `&password=${encodeURIComponent(tempPassword)}` : "";
-    const loginHref = `login.html?next=${next}${emailParam}${passParam}`;
+    // Segurança: nunca trafegar senha em URL.
+    const loginHref = `login.html?next=${next}${emailParam}`;
 
     if (primaryCta) {
       primaryCta.textContent = "Entrar e continuar";
@@ -196,6 +205,8 @@ return;
     if (hint) {
       hint.textContent = "Próximo passo: faça login para confirmar suas credenciais e copiar sua API Key.";
     }
+
+    // (Ainda pode estar visível no DOM; a remoção evita que continue disponível por storage.)
 
 setListItems(integrationSteps, [
   "Faça login para obter sua API Key.",

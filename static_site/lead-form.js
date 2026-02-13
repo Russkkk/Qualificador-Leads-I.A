@@ -4,9 +4,33 @@ const backendMeta = document.querySelector('meta[name="backend-url"]');
 const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
 const THANK_YOU_URL = "obrigado.html";
 
+const normalizePhone = (raw) => String(raw || "").replace(/\D+/g, "");
+
+const formatPhoneBR = (raw) => {
+  const digits = normalizePhone(raw).slice(0, 11);
+  if (digits.length < 3) return digits;
+  const ddd = digits.slice(0, 2);
+  const rest = digits.slice(2);
+  if (rest.length <= 4) return `(${ddd}) ${rest}`;
+  if (rest.length <= 8) return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+  return `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+};
+
 if (window.lucide) {
   window.lucide.createIcons();
 }
+
+const bindPhoneMask = () => {
+  if (!leadForm) return;
+  const phoneInput = leadForm.querySelector('input[name="telefone"]');
+  if (!phoneInput) return;
+  phoneInput.addEventListener("input", () => {
+    const next = formatPhoneBR(phoneInput.value);
+    if (next !== phoneInput.value) phoneInput.value = next;
+  });
+};
+
+bindPhoneMask();
 
 const showStatus = (message, tone = "success") => {
   if (!formStatus) return;
@@ -77,6 +101,18 @@ const showThankYouState = (tempPassword) => {
   `;
 };
 
+const storageSetSession = (key, value) => {
+  try {
+    window.sessionStorage.setItem(key, String(value ?? ""));
+  } catch (_) {}
+};
+
+const storageSetPersist = (key, value) => {
+  try {
+    window.localStorage.setItem(key, String(value ?? ""));
+  } catch (_) {}
+};
+
 if (leadForm) {
   leadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -96,8 +132,16 @@ if (leadForm) {
         body: JSON.stringify({
           nome: payload.name || "",
           email: payload.email || "",
-          telefone: payload.telefone || "",
+          telefone: normalizePhone(payload.telefone || ""),
           password: tempPassword,
+          // Honeypot (anti-bot)
+          company_site: payload.company_site || "",
+          // Captcha (Turnstile) - quando habilitado no servidor, o token é preenchido via site-shell.js
+          captcha_token:
+            window.__LEADRANK_CAPTCHA_TOKEN ||
+            payload["cf-turnstile-response"] ||
+            payload["cf_turnstile_response"] ||
+            "",
         }),
       });
 
@@ -112,14 +156,18 @@ if (leadForm) {
       const clientId = data?.client_id || "";
       const apiKey = response.headers.get("X-API-KEY") || "";
       if (clientId) {
-        localStorage.setItem("leadrank_client_id", clientId);
-        localStorage.setItem("client_id", clientId);
+        // client_id não é segredo: pode persistir.
+        storageSetPersist("leadrank_client_id", clientId);
+        storageSetPersist("client_id", clientId);
       }
       if (apiKey) {
-        localStorage.setItem("leadrank_api_key", apiKey);
-        localStorage.setItem("api_key", apiKey);
+        // API key é sensível: guarde por padrão apenas na sessão.
+        storageSetSession("leadrank_api_key", apiKey);
+        storageSetSession("api_key", apiKey);
       }
-      localStorage.setItem("leadrank_temp_password", tempPassword);
+      // Senha temporária é altamente sensível: evita persistência em localStorage.
+      // Mantemos apenas na sessão para exibir na página de Obrigado.
+      storageSetSession("leadrank_temp_password", tempPassword);
 
       // Para mostrar dados na página de Obrigado.
       localStorage.setItem("leadrank_last_lead_email", String(payload.email || "").trim());

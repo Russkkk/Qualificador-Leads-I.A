@@ -1,8 +1,18 @@
 const backendMeta = document.querySelector('meta[name="backend-url"]');
 const backend = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
 
-const getApiKey = () => (localStorage.getItem("api_key") || "").trim();
-const getClientId = () => (localStorage.getItem("client_id") || "").trim();
+const getFirstStored = (keys) => {
+  for (const key of keys) {
+    try {
+      const v = (sessionStorage.getItem(key) || localStorage.getItem(key) || "").trim();
+      if (v) return v;
+    } catch (_) {}
+  }
+  return "";
+};
+
+const getApiKey = () => getFirstStored(["leadrank_api_key", "api_key", "LR_API_KEY"]);
+const getClientId = () => getFirstStored(["leadrank_client_id", "client_id", "LR_CLIENT_ID"]);
 
 const authHeaders = () => {
   const apiKey = getApiKey();

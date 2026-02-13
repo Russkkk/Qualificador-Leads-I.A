@@ -1,0 +1,6 @@
+/* Team */
+LeadRank (Qualificador de Leads com IA)
+
+/* Site */
+Language: pt-BR
+Last update: 2026-02-12

@@ -128,7 +128,7 @@ const submitSignup = async () => {
     if (!response.ok) {
       throw new Error(data.error || data.message || "Erro ao criar conta.");
     }
-    apiKey.value = response.headers.get("X-API-KEY") || localStorage.getItem("api_key") || "";
+    apiKey.value = response.headers.get("X-API-KEY") || sessionStorage.getItem("api_key") || localStorage.getItem("api_key") || "";
     clientId.value = data.client_id || "";
     if (clientId.value) {
       localStorage.setItem("client_id", clientId.value);
@@ -136,9 +136,10 @@ const submitSignup = async () => {
       localStorage.setItem("LR_CLIENT_ID", clientId.value);
     }
     if (apiKey.value) {
-      localStorage.setItem("api_key", apiKey.value);
-      localStorage.setItem("leadrank_api_key", apiKey.value);
-      localStorage.setItem("LR_API_KEY", apiKey.value);
+      // API key é sensível: por padrão, salva apenas na sessão.
+      sessionStorage.setItem("api_key", apiKey.value);
+      sessionStorage.setItem("leadrank_api_key", apiKey.value);
+      sessionStorage.setItem("LR_API_KEY", apiKey.value);
     }
     currentStep.value = 2;
   } catch (err) {

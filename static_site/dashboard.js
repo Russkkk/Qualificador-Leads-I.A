@@ -1,5 +1,6 @@
 (function () {
-  const BACKEND = (window.BACKEND_URL || "https://qualificador-leads-i-a.onrender.com").replace(/\/$/, "");
+  const backendMeta = document.querySelector('meta[name="backend-url"]');
+  const BACKEND = (window.BACKEND_URL || backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
 
   function $(sel, root = document) {
     return root.querySelector(sel);
@@ -8,11 +9,20 @@
     return Array.from(root.querySelectorAll(sel));
   }
 
+  function getStoredFirst(keys) {
+    for (const key of keys) {
+      try {
+        const v = (sessionStorage.getItem(key) || localStorage.getItem(key) || "").trim();
+        if (v) return v;
+      } catch (_) {}
+    }
+    return "";
+  }
   function getApiKey() {
-    return localStorage.getItem("api_key") || "";
+    return getStoredFirst(["leadrank_api_key", "api_key", "LR_API_KEY"]);
   }
   function getClientId() {
-    return localStorage.getItem("client_id") || "";
+    return getStoredFirst(["leadrank_client_id", "client_id", "LR_CLIENT_ID"]);
   }
 
   function setState(state) {
@@ -113,14 +123,14 @@
 
     setState("loading");
     try {
-      const resp = await fetch(`${BACKEND}/acao_do_dia?client_id=${encodeURIComponent(clientId)}`, {
-        headers: { "X-API-KEY": apiKey }
+      const resp = await fetch(`${BACKEND}/acao_do_dia`, {
+        headers: { "X-API-KEY": apiKey, "X-CLIENT-ID": clientId }
       });
 
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
       const data = await resp.json();
-      const list = data.action_list || data.items || [];
+      const list = data.action_list || data.rows || data.items || [];
       if (!Array.isArray(list) || list.length === 0) {
         setState("empty");
         return;
@@ -150,7 +160,8 @@
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "X-API-KEY": apiKey
+              "X-API-KEY": apiKey,
+              "X-CLIENT-ID": clientId
             },
             body: JSON.stringify({ client_id: clientId, n: 10 })
           });
@@ -165,8 +176,29 @@
     if (exportBtn) {
       exportBtn.addEventListener("click", () => {
         const clientId = getClientId();
+        const apiKey = getApiKey();
         if (!clientId) return;
-        window.open(`${BACKEND}/leads_export.csv?client_id=${encodeURIComponent(clientId)}`, "_blank");
+        if (!apiKey) return;
+
+        // Download com headers (window.open não permite headers).
+        fetch(`${BACKEND}/leads_export.csv`, {
+          headers: { "X-API-KEY": apiKey, "X-CLIENT-ID": clientId },
+        })
+          .then((resp) => {
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.blob();
+          })
+          .then((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `leads_${clientId}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          })
+          .catch((e) => console.warn("Falha ao exportar CSV", e));
       });
     }
   }

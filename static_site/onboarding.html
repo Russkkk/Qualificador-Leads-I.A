@@ -175,28 +175,7 @@
               </div>
             <div class="integration-item rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
               <strong>cURL pronto</strong>
-              
-
-              <div class="mt-3 flex flex-wrap items-center gap-2" role="tablist" aria-label="Formato do payload (exemplo)">
-                <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500"
-                        type="button" id="payloadFormatRoot" role="tab" aria-selected="true" data-format="root">
-                  Root
-                </button>
-                <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500"
-                        type="button" id="payloadFormatLead" role="tab" aria-selected="false" data-format="lead">
-                  { "lead": {...} }
-                </button>
-                <span class="text-xs text-slate-500">(altera só o exemplo)</span>
-              </div>
-              <div class="mt-3 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                <p class="text-xs font-semibold text-white">Exemplo de JSON</p>
-                <code class="mt-2 block whitespace-pre-wrap text-xs text-slate-300" id="payloadExample">{}</code>
-                <div class="mt-3 flex flex-wrap items-center gap-2">
-                  <button class="btn btn--ghost rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-slate-500"
-                          type="button" id="copyPayload" aria-label="Copiar JSON de exemplo">Copiar JSON</button>
-                </div>
-              </div>
-<code class="mt-2 block whitespace-pre-wrap text-xs text-slate-300" id="curlExample">curl -X POST https://qualificador-leads-ia.onrender.com/prever \
+              <code class="mt-2 block whitespace-pre-wrap text-xs text-slate-300" id="curlExample">curl -X POST https://qualificador-leads-ia.onrender.com/prever \
 -H "Content-Type: application/json" \
 -H "X-API-KEY: SUA_API_KEY" \
 -H "X-CLIENT-ID: SEU_WORKSPACE" \
@@ -269,11 +248,73 @@
     const backendMeta = document.querySelector('meta[name="backend-url"]');
     const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
 
+    const storageGet = (key) => {
+      try {
+        return (sessionStorage.getItem(key) || localStorage.getItem(key) || "").toString();
+      } catch (_) {
+        return "";
+      }
+    };
+
+    const storageSet = (key, value, { persist = false } = {}) => {
+      const v = (value ?? "").toString();
+      try { sessionStorage.setItem(key, v); } catch (_) {}
+      if (persist) {
+        try { localStorage.setItem(key, v); } catch (_) {}
+      }
+    };
+
     const endpointPreverEl = document.getElementById("endpointPrever");
     if (endpointPreverEl) endpointPreverEl.textContent = `POST ${BACKEND}/prever`;
 
     const panels = document.querySelectorAll("[data-step-panel]");
     const stepperItems = document.querySelectorAll(".stepper__item");
+
+    // Helpers
+    function qs(key) {
+      try {
+        return new URLSearchParams(window.location.search).get(key);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function setStep(step) {
+      const s = String(step);
+
+      // Toggle panels
+      panels.forEach((panel) => {
+        const active = panel.getAttribute("data-step-panel") === s;
+        panel.classList.toggle("is-active", active);
+
+        if (active) {
+          // Accessibility: move focus to the panel heading without scrolling the page.
+          const heading = panel.querySelector("h1, h2, h3");
+          if (heading) {
+            const hadTabIndex = heading.hasAttribute("tabindex");
+            if (!hadTabIndex) heading.setAttribute("tabindex", "-1");
+            try { heading.focus({ preventScroll: true }); } catch (_) { heading.focus(); }
+            if (!hadTabIndex) setTimeout(() => heading.removeAttribute("tabindex"), 0);
+          }
+        }
+      });
+
+      // Toggle stepper items
+      stepperItems.forEach((item) => {
+        const active = item.getAttribute("data-step") === s;
+        item.classList.toggle("is-active", active);
+        if (active) item.setAttribute("aria-current", "step");
+        else item.removeAttribute("aria-current");
+      });
+
+      // Keep URL in sync (no reload)
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set("step", s);
+        window.history.replaceState({}, "", url.toString());
+      } catch (_) {}
+    }
+
     const toggleLogin = document.getElementById("toggleLogin");
     const signupForm = document.getElementById("signupForm");
     const loginForm = document.getElementById("loginForm");
@@ -293,20 +334,13 @@
     const curlExampleEl = document.getElementById("curlExample");
     const copyCurlBtn = document.getElementById("copyCurl");
 
-    const payloadExampleEl = document.getElementById("payloadExample");
-    const copyPayloadBtn = document.getElementById("copyPayload");
-    const payloadFormatRootBtn = document.getElementById("payloadFormatRoot");
-    const payloadFormatLeadBtn = document.getElementById("payloadFormatLead");
-
     let currentStep = 1;
     let authState = { clientId: "", apiKey: "" };
   function buildCurlExample(apiKey, clientId) {
   const safeApiKey = (apiKey || "").trim() || "SUA_API_KEY";
   const safeClientId = (clientId || "").trim() || "SEU_WORKSPACE";
   const endpoint = BACKEND + "/prever";
-  const body = (typeof window.__LR_PAYLOAD_JSON === "string" && window.__LR_PAYLOAD_JSON.trim())
-    ? window.__LR_PAYLOAD_JSON.trim()
-    : '{"nome":"João Silva","email":"joao@empresa.com","telefone":"11987654321","origem":"landing","tempo_site":120,"paginas_visitadas":3,"clicou_preco":1}';
+  const body = '{"nome":"João Silva","email":"joao@empresa.com","telefone":"11987654321","origem":"landing","tempo_site":120,"paginas_visitadas":3,"clicou_preco":1}';
 
   return [
     `curl -X POST ${endpoint} \\`,
@@ -320,99 +354,12 @@
 
 function updateCurlExample() {
   if (!curlExampleEl) return;
-  const apiKey = authState.apiKey || (localStorage.getItem("leadrank_api_key") || localStorage.getItem("api_key") || localStorage.getItem("LR_API_KEY") || "").trim();
-  const clientId = authState.clientId || (localStorage.getItem("leadrank_client_id") || localStorage.getItem("client_id") || localStorage.getItem("LR_CLIENT_ID") || "").trim();
+  const apiKey = authState.apiKey || (storageGet("leadrank_api_key") || storageGet("api_key") || storageGet("LR_API_KEY") || "").trim();
+  const clientId = authState.clientId || (storageGet("leadrank_client_id") || storageGet("client_id") || storageGet("LR_CLIENT_ID") || "").trim();
   curlExampleEl.textContent = buildCurlExample(apiKey, clientId);
 }
 
 updateCurlExample();
-
-
-    // --- Payload example (Root vs { lead: {...} }) ---
-    const PAYLOAD_FORMAT_KEY = "leadrank_prever_payload_format";
-    const getPayloadFormat = () => {
-      try {
-        const v = (localStorage.getItem(PAYLOAD_FORMAT_KEY) || "").trim().toLowerCase();
-        return v === "lead" ? "lead" : "root";
-      } catch (_) {
-        return "root";
-      }
-    };
-
-    const setPayloadFormat = (fmt) => {
-      const v = fmt === "lead" ? "lead" : "root";
-      try { localStorage.setItem(PAYLOAD_FORMAT_KEY, v); } catch (_) {}
-      if (payloadFormatRootBtn) payloadFormatRootBtn.setAttribute("aria-selected", v === "root" ? "true" : "false");
-      if (payloadFormatLeadBtn) payloadFormatLeadBtn.setAttribute("aria-selected", v === "lead" ? "true" : "false");
-      if (payloadFormatRootBtn) payloadFormatRootBtn.classList.toggle("bg-indigo-500/10", v === "root");
-      if (payloadFormatLeadBtn) payloadFormatLeadBtn.classList.toggle("bg-indigo-500/10", v === "lead");
-    };
-
-    const localExampleFor = (fmt) => {
-      const leadObj = {
-        nome: "João Silva",
-        email: "joao@empresa.com",
-        telefone: "11987654321",
-        origem: "landing",
-        tempo_site: 120,
-        paginas_visitadas: 3,
-        clicou_preco: 1,
-      };
-      return fmt === "lead" ? { lead: leadObj } : leadObj;
-    };
-
-    const loadServerExample = async (fmt) => {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch(BACKEND + "/prever_example?format=" + encodeURIComponent(fmt || "root"), {
-          method: "GET",
-          headers: { "Accept": "application/json" },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (!res.ok) return null;
-
-        const payload = await res.json().catch(() => null);
-        if (!payload) return null;
-
-        // json_ok normalmente retorna { ok: true, ... }
-        const ex = payload.example || (payload.data && payload.data.example) || null;
-        if (!ex) return null;
-        return ex;
-      } catch (_) {
-        return null;
-      }
-    };
-
-    const applyPayloadExample = async (fmt) => {
-      const effective = fmt === "lead" ? "lead" : "root";
-      setPayloadFormat(effective);
-
-      const ex = (await loadServerExample(effective)) || localExampleFor(effective);
-      const pretty = JSON.stringify(ex, null, 2);
-
-      // usado pelo cURL
-      window.__LR_PAYLOAD_JSON = pretty;
-
-      if (payloadExampleEl) payloadExampleEl.textContent = pretty;
-      updateCurlExample();
-    };
-
-    // init payload example
-    applyPayloadExample(getPayloadFormat());
-
-    if (payloadFormatRootBtn) payloadFormatRootBtn.addEventListener("click", () => applyPayloadExample("root"));
-    if (payloadFormatLeadBtn) payloadFormatLeadBtn.addEventListener("click", () => applyPayloadExample("lead"));
-
-    if (copyPayloadBtn) {
-      copyPayloadBtn.addEventListener("click", async () => {
-        const txt = (payloadExampleEl && payloadExampleEl.textContent) ? payloadExampleEl.textContent : (window.__LR_PAYLOAD_JSON || "");
-        if (!txt) return;
-        const ok = await copyText(txt);
-        if (ok) flashCopied(copyPayloadBtn, "Copiar JSON");
-      });
-    }
 
     function showError(message) {
       errorDiv.textContent = message;
@@ -422,14 +369,16 @@ updateCurlExample();
     function setAuth(clientId, apiKey) {
       authState = { clientId, apiKey };
       if (clientId) {
-        localStorage.setItem("leadrank_client_id", clientId);
-        localStorage.setItem("client_id", clientId);
-        localStorage.setItem("LR_CLIENT_ID", clientId);
+        // client_id não é segredo: pode persistir.
+        storageSet("leadrank_client_id", clientId, { persist: true });
+        storageSet("client_id", clientId, { persist: true });
+        storageSet("LR_CLIENT_ID", clientId, { persist: true });
       }
       if (apiKey) {
-        localStorage.setItem("leadrank_api_key", apiKey);
-        localStorage.setItem("api_key", apiKey);
-        localStorage.setItem("LR_API_KEY", apiKey);
+        // API key é sensível: salva por padrão apenas na sessão.
+        storageSet("leadrank_api_key", apiKey);
+        storageSet("api_key", apiKey);
+        storageSet("LR_API_KEY", apiKey);
       }
       apiKeyValue.textContent = apiKey || "—";
       updateCurlExample();
@@ -557,8 +506,8 @@ updateCurlExample();
 
     if (copyHeadersBtn) {
       copyHeadersBtn.addEventListener("click", async () => {
-        const apiKey = authState.apiKey || (localStorage.getItem("leadrank_api_key") || localStorage.getItem("api_key") || localStorage.getItem("LR_API_KEY") || "").trim() || "sua-chave";
-        const clientId = authState.clientId || (localStorage.getItem("leadrank_client_id") || localStorage.getItem("client_id") || localStorage.getItem("LR_CLIENT_ID") || "").trim() || "seu-workspace";
+        const apiKey = authState.apiKey || (storageGet("leadrank_api_key") || storageGet("api_key") || storageGet("LR_API_KEY") || "").trim() || "sua-chave";
+        const clientId = authState.clientId || (storageGet("leadrank_client_id") || storageGet("client_id") || storageGet("LR_CLIENT_ID") || "").trim() || "seu-workspace";
         const headers = `X-API-KEY: ${apiKey}
 X-CLIENT-ID: ${clientId}`;
         const ok = await copyText(headers);
@@ -568,8 +517,8 @@ X-CLIENT-ID: ${clientId}`;
 
 if (copyCurlBtn) {
   copyCurlBtn.addEventListener("click", async () => {
-    const apiKey = authState.apiKey || (localStorage.getItem("leadrank_api_key") || localStorage.getItem("api_key") || localStorage.getItem("LR_API_KEY") || "").trim() || "SUA_API_KEY";
-    const clientId = authState.clientId || (localStorage.getItem("leadrank_client_id") || localStorage.getItem("client_id") || localStorage.getItem("LR_CLIENT_ID") || "").trim() || "SEU_WORKSPACE";
+    const apiKey = authState.apiKey || (storageGet("leadrank_api_key") || storageGet("api_key") || storageGet("LR_API_KEY") || "").trim() || "SUA_API_KEY";
+    const clientId = authState.clientId || (storageGet("leadrank_client_id") || storageGet("client_id") || storageGet("LR_CLIENT_ID") || "").trim() || "SEU_WORKSPACE";
     const curlCmd = buildCurlExample(apiKey, clientId);
     const ok = await copyText(curlCmd);
     if (ok) flashCopied(copyCurlBtn, "Copiar cURL");
@@ -687,7 +636,7 @@ if (copyCurlBtn) {
     const getStoredFirst = (keys) => {
       try {
         for (const key of keys) {
-          const v = (localStorage.getItem(key) || "").trim();
+          const v = (storageGet(key) || "").trim();
           if (v) return v;
         }
       } catch (_) {}

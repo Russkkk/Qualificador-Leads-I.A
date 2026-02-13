@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo - LeadRank</title>
+    <meta name="description" content="Veja uma demonstração do LeadRank sem criar conta." />
+    <meta name="backend-url" content="https://qualificador-leads-ia.onrender.com" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%234F46E5'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' font-size='32' font-family='Arial' fill='white'%3ELR%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="assets/tailwind.css" />
+  </head>
+  <body data-active-nav="acao" class="bg-slate-950 text-slate-100">
+    <template id="header-actions-template">
+      <a class="btn btn--ghost btn--small" href="pricing.html">Planos</a>
+      <a class="btn btn--small" href="onboarding.html">Criar conta</a>
+    </template>
+
+    <div class="page">
+      <div data-include="site-header"></div>
+
+      <main class="mx-auto w-full max-w-6xl px-6 pb-16 pt-10">
+        <section class="space-y-6">
+          <div class="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Demo</p>
+              <h1 class="text-3xl font-semibold text-white sm:text-4xl">Ação do Dia (exemplo)</h1>
+              <p class="text-sm text-slate-300">Dados fictícios — sem acesso ao seu banco ou integrações.</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <a class="btn btn--ghost btn--tiny" href="index.html#contato">Quero isso no meu negócio</a>
+              <a class="btn btn--tiny" href="onboarding.html">Criar conta</a>
+            </div>
+          </div>
+
+          <div class="alert rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-slate-300" id="demoAlert" role="status" aria-live="polite" hidden></div>
+          <div class="px-2 text-sm text-slate-300" id="demoLoading">Carregando demo…</div>
+
+          <div class="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-left text-sm text-slate-200">
+                <thead class="bg-slate-900/60 text-xs uppercase text-slate-400">
+                  <tr>
+                    <th class="px-6 py-4">Lead</th>
+                    <th class="px-6 py-4">Empresa</th>
+                    <th class="px-6 py-4">Score</th>
+                    <th class="px-6 py-4">Interesse</th>
+                    <th class="px-6 py-4">Prioridade</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-white/10" id="demoTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div data-include="site-footer"></div>
+    </div>
+
+    <script>
+      (function () {
+        const backendMeta = document.querySelector('meta[name="backend-url"]');
+        const BACKEND = (window.BACKEND_URL || backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+
+        const tbody = document.getElementById("demoTbody");
+        const loading = document.getElementById("demoLoading");
+        const alertBox = document.getElementById("demoAlert");
+
+        const pill = (temp) => {
+          const t = String(temp || "").toLowerCase();
+          if (t === "hot") return '<span class="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-200">🔥 Quente</span>';
+          if (t === "warm") return '<span class="rounded-full bg-blue-500/20 px-3 py-1 text-xs font-semibold text-blue-200">🟡 Morno</span>';
+          return '<span class="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">❄️ Frio</span>';
+        };
+
+        const esc = (s) => String(s ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+
+        async function loadDemo() {
+          try {
+            const resp = await fetch(`${BACKEND}/demo/acao_do_dia`, { method: "GET" });
+            const data = await resp.json().catch(() => null);
+            if (!resp.ok || !data || data.ok !== true) throw new Error("bad_response");
+            if (data.enabled !== true) {
+              alertBox.textContent = "Demo desativada no servidor. Ative DEMO_MODE=true para expor dados de exemplo.";
+              alertBox.hidden = false;
+              return;
+            }
+            const rows = Array.isArray(data.rows) ? data.rows : [];
+            if (!rows.length) {
+              alertBox.textContent = "Nenhum dado de demo encontrado.";
+              alertBox.hidden = false;
+              return;
+            }
+            tbody.innerHTML = rows
+              .slice(0, 20)
+              .map((r) => {
+                const score = Number(r.score ?? 0);
+                return `
+                  <tr>
+                    <td class="px-6 py-4">
+                      <div class="font-semibold text-white">${esc(r.nome || "Lead")}</div>
+                      <div class="text-xs text-slate-400">${esc(r.email || "")}</div>
+                    </td>
+                    <td class="px-6 py-4">${esc(r.empresa || "—")}</td>
+                    <td class="px-6 py-4">
+                      <span class="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">${esc(score)}</span>
+                    </td>
+                    <td class="px-6 py-4">${esc(r.interesse || "—")}</td>
+                    <td class="px-6 py-4">${pill(r.temperatura)}</td>
+                  </tr>
+                `;
+              })
+              .join("");
+          } catch (e) {
+            alertBox.textContent = "Não foi possível carregar a demo agora. Tente novamente em instantes.";
+            alertBox.hidden = false;
+          } finally {
+            if (loading) loading.hidden = true;
+          }
+        }
+
+        document.addEventListener("DOMContentLoaded", loadDemo);
+      })();
+    </script>
+    <script type="module" src="partials/site-shell.js"></script>
+  </body>
+</html>

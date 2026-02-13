@@ -82,6 +82,45 @@
       const loginForm = document.getElementById("loginForm");
       const loginError = document.getElementById("loginError");
 
+      const storageGet = (key) => {
+        try {
+          return (sessionStorage.getItem(key) || localStorage.getItem(key) || "").toString();
+        } catch (_) {
+          return "";
+        }
+      };
+
+      const storageSet = (key, value, { persist = false } = {}) => {
+        const v = (value ?? "").toString();
+        try {
+          // sessionStorage por padrão (menos exposição). use persist=true quando fizer sentido.
+          sessionStorage.setItem(key, v);
+        } catch (_) {}
+        if (persist) {
+          try {
+            localStorage.setItem(key, v);
+          } catch (_) {}
+        }
+      };
+
+      const safeNextUrl = (raw) => {
+        const next = (raw || "").toString().trim();
+        if (!next) return "";
+        // Bloqueia redirecionamentos externos (phishing).
+        try {
+          const url = new URL(next, window.location.origin);
+          if (url.origin !== window.location.origin) return "";
+          // Permite apenas páginas internas HTML (ou hash).
+          if (!/\.html$/i.test(url.pathname) && url.hash && url.pathname === "/") {
+            return url.hash;
+          }
+          if (!/\.html$/i.test(url.pathname)) return "";
+          return `${url.pathname.replace(/^\//, "")}${url.search || ""}${url.hash || ""}`;
+        } catch (_) {
+          return "";
+        }
+      };
+
       loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         loginError.className = "alert";
@@ -111,17 +150,20 @@
           const clientId = data.client_id || "";
           const apiKey = res.headers.get("X-API-KEY") || "";
           if (clientId) {
-            localStorage.setItem("leadrank_client_id", clientId);
-            localStorage.setItem("client_id", clientId);
-            localStorage.setItem("LR_CLIENT_ID", clientId);
+            // client_id não é segredo: pode persistir.
+            storageSet("leadrank_client_id", clientId, { persist: true });
+            storageSet("client_id", clientId, { persist: true });
+            storageSet("LR_CLIENT_ID", clientId, { persist: true });
           }
           if (apiKey) {
-            localStorage.setItem("leadrank_api_key", apiKey);
-            localStorage.setItem("api_key", apiKey);
-            localStorage.setItem("LR_API_KEY", apiKey);
+            // API key é sensível: guarda por padrão apenas na sessão.
+            storageSet("leadrank_api_key", apiKey);
+            storageSet("api_key", apiKey);
+            storageSet("LR_API_KEY", apiKey);
           }
 
-          const next = new URLSearchParams(location.search).get('next') || '';
+          const rawNext = new URLSearchParams(location.search).get('next') || '';
+          const next = safeNextUrl(rawNext);
           window.location.href = next || "acao.html";
         } catch (err) {
           loginError.textContent = err.message || "Erro de conexão. Tente novamente.";
@@ -135,14 +177,9 @@
       try {
         const params = new URLSearchParams(window.location.search || "");
         const prefillEmail = (params.get("email") || "").trim();
-        const prefillPassword = params.get("password") || "";
         if (prefillEmail) {
           const emailInput = document.getElementById("loginEmail");
           if (emailInput) emailInput.value = prefillEmail;
-        }
-        if (prefillPassword) {
-          const passInput = document.getElementById("loginPassword");
-          if (passInput) passInput.value = prefillPassword;
         }
       } catch (_) {}
     </script>
