@@ -5,7 +5,7 @@ from datetime import timedelta
 from typing import Any, Dict
 
 import psycopg
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, request, stream_with_context
 from psycopg.rows import dict_row
 
 from extensions import limiter
@@ -533,64 +533,83 @@ def insights():
                 active_leads_query = get_active_leads_query()
                 cur.execute(
                     f"""
-                    SELECT probabilidade, virou_cliente, created_at
+                    SELECT
+                      COUNT(*) AS window_total,
+                      COUNT(*) FILTER (WHERE virou_cliente IS NOT NULL) AS labeled,
+                      COUNT(*) FILTER (WHERE virou_cliente = 1) AS converted,
+                      COUNT(*) FILTER (WHERE virou_cliente = 0) AS denied,
+
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.0 AND probabilidade < 0.2 AND virou_cliente IS NOT NULL) AS b0_labeled,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.0 AND probabilidade < 0.2 AND virou_cliente = 1) AS b0_converted,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.2 AND probabilidade < 0.4 AND virou_cliente IS NOT NULL) AS b1_labeled,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.2 AND probabilidade < 0.4 AND virou_cliente = 1) AS b1_converted,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.4 AND probabilidade < 0.6 AND virou_cliente IS NOT NULL) AS b2_labeled,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.4 AND probabilidade < 0.6 AND virou_cliente = 1) AS b2_converted,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.6 AND probabilidade < 0.8 AND virou_cliente IS NOT NULL) AS b3_labeled,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.6 AND probabilidade < 0.8 AND virou_cliente = 1) AS b3_converted,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.8 AND probabilidade < 1.01 AND virou_cliente IS NOT NULL) AS b4_labeled,
+                      COUNT(*) FILTER (WHERE probabilidade IS NOT NULL AND probabilidade >= 0.8 AND probabilidade < 1.01 AND virou_cliente = 1) AS b4_converted
                     {active_leads_query}
                       AND client_id=%s
                       AND created_at >= %s
-                    ORDER BY created_at ASC
                     """,
                     (client_id, since),
                 )
-                rows = [dict(r) for r in (cur.fetchall() or [])]
+                agg = cur.fetchone() or {}
+
+                cur.execute(
+                    f"""
+                    SELECT
+                      DATE(created_at) AS day,
+                      COUNT(*) AS total,
+                      COUNT(*) FILTER (WHERE virou_cliente = 1) AS converted,
+                      COUNT(*) FILTER (WHERE virou_cliente = 0) AS denied,
+                      COUNT(*) FILTER (WHERE virou_cliente IS NULL) AS pending
+                    {active_leads_query}
+                      AND client_id=%s
+                      AND created_at >= %s
+                    GROUP BY DATE(created_at)
+                    ORDER BY DATE(created_at) ASC
+                    """,
+                    (client_id, since),
+                )
+                day_rows = cur.fetchall() or []
     finally:
         conn.close()
 
-    bands_def = [
-        ("0-0.2", 0.0, 0.2),
-        ("0.2-0.4", 0.2, 0.4),
-        ("0.4-0.6", 0.4, 0.6),
-        ("0.6-0.8", 0.6, 0.8),
-        ("0.8-1.0", 0.8, 1.01),
+    def _rate(converted: int, labeled: int) -> float:
+        return round(float((converted / labeled) if labeled else 0.0), 4)
+
+    bands = [
+        {"band": "0-0.2", "labeled": int(agg.get("b0_labeled") or 0), "converted": int(agg.get("b0_converted") or 0), "conversion_rate": _rate(int(agg.get("b0_converted") or 0), int(agg.get("b0_labeled") or 0))},
+        {"band": "0.2-0.4", "labeled": int(agg.get("b1_labeled") or 0), "converted": int(agg.get("b1_converted") or 0), "conversion_rate": _rate(int(agg.get("b1_converted") or 0), int(agg.get("b1_labeled") or 0))},
+        {"band": "0.4-0.6", "labeled": int(agg.get("b2_labeled") or 0), "converted": int(agg.get("b2_converted") or 0), "conversion_rate": _rate(int(agg.get("b2_converted") or 0), int(agg.get("b2_labeled") or 0))},
+        {"band": "0.6-0.8", "labeled": int(agg.get("b3_labeled") or 0), "converted": int(agg.get("b3_converted") or 0), "conversion_rate": _rate(int(agg.get("b3_converted") or 0), int(agg.get("b3_labeled") or 0))},
+        {"band": "0.8-1.0", "labeled": int(agg.get("b4_labeled") or 0), "converted": int(agg.get("b4_converted") or 0), "conversion_rate": _rate(int(agg.get("b4_converted") or 0), int(agg.get("b4_labeled") or 0))},
     ]
 
-    bands = []
-    for name, lo, hi in bands_def:
-        subset = [r for r in rows if r.get("probabilidade") is not None and lo <= float(r["probabilidade"]) < hi]
-        labeled = [r for r in subset if r.get("virou_cliente") is not None]
-        conv = sum(1 for r in labeled if float(r["virou_cliente"]) == 1.0)
-        total = len(labeled)
-        rate = (conv / total) if total else 0.0
-        bands.append({"band": name, "labeled": total, "converted": conv, "conversion_rate": round(float(rate), 4)})
+    series = [
+        {
+            "day": (r.get("day").isoformat() if r.get("day") else ""),
+            "total": int(r.get("total") or 0),
+            "converted": int(r.get("converted") or 0),
+            "denied": int(r.get("denied") or 0),
+            "pending": int(r.get("pending") or 0),
+        }
+        for r in day_rows
+    ]
 
-    by_day: Dict[str, Dict[str, Any]] = {}
-    for r in rows:
-        dt = r.get("created_at")
-        if not dt:
-            continue
-        day = dt.date().isoformat()
-        by_day.setdefault(day, {"day": day, "total": 0, "converted": 0, "denied": 0, "pending": 0})
-        by_day[day]["total"] += 1
-        vc = r.get("virou_cliente")
-        if vc is None:
-            by_day[day]["pending"] += 1
-        elif float(vc) == 1.0:
-            by_day[day]["converted"] += 1
-        else:
-            by_day[day]["denied"] += 1
-
-    series = [by_day[k] for k in sorted(by_day.keys())]
-
-    labeled_all = [r for r in rows if r.get("virou_cliente") is not None]
-    conv_all = sum(1 for r in labeled_all if float(r["virou_cliente"]) == 1.0)
-    den_all = sum(1 for r in labeled_all if float(r["virou_cliente"]) == 0.0)
-    overall_rate = (conv_all / len(labeled_all)) if labeled_all else 0.0
+    labeled_all = int(agg.get("labeled") or 0)
+    conv_all = int(agg.get("converted") or 0)
+    den_all = int(agg.get("denied") or 0)
+    overall_rate = (conv_all / labeled_all) if labeled_all else 0.0
 
     payload = {
         "client_id": client_id,
         "threshold": float(threshold),
         "overall": {
-            "window_total": len(rows),
-            "labeled": len(labeled_all),
+            "window_total": int(agg.get("window_total") or 0),
+            "labeled": labeled_all,
             "converted": conv_all,
             "denied": den_all,
             "conversion_rate": round(float(overall_rate), 4),
@@ -614,25 +633,6 @@ def leads_export():
     if not ok_auth:
         return json_err(msg, 403, code="auth_required")
 
-    conn = db()
-    try:
-        with conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                active_leads_query = get_active_leads_query()
-                cur.execute(
-                    f"""
-                    SELECT nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
-                           probabilidade, score, created_at, virou_cliente
-                    {active_leads_query}
-                      AND client_id=%s
-                    ORDER BY created_at DESC
-                    """,
-                    (client_id,),
-                )
-                rows = cur.fetchall() or []
-    finally:
-        conn.close()
-
     # CSV seguro: aplica quoting adequado e mitiga CSV injection (Excel/Sheets).
     import csv
     import io
@@ -644,37 +644,69 @@ def leads_export():
             return "'" + s
         return s
 
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow([
-        "nome",
-        "email",
-        "telefone",
-        "tempo_site",
-        "paginas_visitadas",
-        "clicou_preco",
-        "probabilidade",
-        "score",
-        "created_at",
-        "virou_cliente",
-    ])
+    def generate_csv():
+        conn = db()
+        cur = None
+        try:
+            cur = conn.cursor(row_factory=dict_row)
+            active_leads_query = get_active_leads_query()
+            cur.execute(
+                f"""
+                SELECT nome, email_lead, telefone, tempo_site, paginas_visitadas, clicou_preco,
+                       probabilidade, score, created_at, virou_cliente
+                {active_leads_query}
+                  AND client_id=%s
+                ORDER BY created_at DESC
+                """,
+                (client_id,),
+            )
 
-    for r in rows:
-        writer.writerow([
-            csv_safe(r.get("nome")),
-            csv_safe(r.get("email_lead")),
-            csv_safe(r.get("telefone")),
-            csv_safe(r.get("tempo_site")),
-            csv_safe(r.get("paginas_visitadas")),
-            csv_safe(r.get("clicou_preco")),
-            csv_safe(r.get("probabilidade")),
-            csv_safe(r.get("score")),
-            csv_safe(iso(r.get("created_at")) or ""),
-            csv_safe(r.get("virou_cliente")),
-        ])
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow([
+                "nome",
+                "email",
+                "telefone",
+                "tempo_site",
+                "paginas_visitadas",
+                "clicou_preco",
+                "probabilidade",
+                "score",
+                "created_at",
+                "virou_cliente",
+            ])
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
 
-    csv_text = buf.getvalue()
-    return Response(csv_text, mimetype="text/csv")
+            while True:
+                rows = cur.fetchmany(1000)
+                if not rows:
+                    break
+                for r in rows:
+                    writer.writerow([
+                        csv_safe(r.get("nome")),
+                        csv_safe(r.get("email_lead")),
+                        csv_safe(r.get("telefone")),
+                        csv_safe(r.get("tempo_site")),
+                        csv_safe(r.get("paginas_visitadas")),
+                        csv_safe(r.get("clicou_preco")),
+                        csv_safe(r.get("probabilidade")),
+                        csv_safe(r.get("score")),
+                        csv_safe(iso(r.get("created_at")) or ""),
+                        csv_safe(r.get("virou_cliente")),
+                    ])
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+        finally:
+            try:
+                if cur is not None:
+                    cur.close()
+            finally:
+                conn.close()
+
+    return Response(stream_with_context(generate_csv()), mimetype="text/csv")
 
 
 @leads_bp.post("/demo_public")

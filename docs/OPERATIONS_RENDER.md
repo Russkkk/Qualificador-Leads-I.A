@@ -7,6 +7,7 @@ Este guia foi escrito para **ativar observabilidade, anti‑spam e modo demo** s
 **Obrigatório**
 - `DATABASE_URL`
 - `FLASK_SECRET_KEY` (forte)
+- `ALLOWED_ORIGINS` (lista explícita, sem `*`)
 
 **Recomendado**
 - `TRUST_PROXY=true` (quando estiver atrás de proxy na Render)
@@ -76,3 +77,15 @@ Página:
 ## 6) Smoke tests
 
 Veja `scripts/smoke_test.sh`.
+
+
+## 7) CORS (allowlist explícita)
+
+Configure `ALLOWED_ORIGINS` com domínios permitidos, separados por vírgula.
+
+Exemplos:
+- Produção: `ALLOWED_ORIGINS=https://qualificador-leads-ia.onrender.com,https://leadrank.com.br`
+- Staging: `ALLOWED_ORIGINS=https://staging.seudominio.com`
+- Dev local: `ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000`
+
+> Importante: não usar `*` quando houver credenciais/cookies.

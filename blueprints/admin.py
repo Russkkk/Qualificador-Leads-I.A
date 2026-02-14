@@ -3,7 +3,7 @@ from psycopg.rows import dict_row
 
 from extensions import limiter
 from services.db import db
-from services.demo_service import require_demo_key
+from services.demo_service import require_admin_key
 from services.utils import json_err, json_ok, month_key
 
 admin_bp = Blueprint("admin", __name__)
@@ -12,9 +12,9 @@ admin_bp = Blueprint("admin", __name__)
 @admin_bp.post("/admin/reset_month")
 @limiter.limit("100 per minute")
 def admin_reset_month():
-    ok, _ = require_demo_key()
+    ok, _ = require_admin_key()
     if not ok:
-        return json_err("Unauthorized (DEMO_KEY)", 403)
+        return json_err("Unauthorized", 403)
 
     mk = month_key()
     conn = db()

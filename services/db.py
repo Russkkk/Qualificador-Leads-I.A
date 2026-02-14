@@ -1,8 +1,14 @@
+import atexit
+import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import psycopg
 from psycopg.rows import dict_row
+try:
+    from psycopg_pool import ConnectionPool
+except Exception:  # pragma: no cover - fallback para ambientes sem pacote
+    ConnectionPool = None
 
 from services import settings
 from services.utils import month_key
@@ -11,15 +17,129 @@ _SCHEMA_READY = False
 _SCHEMA_LOCK = None
 _MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
+_POOL: "ConnectionPool | None" = None
+
+
+class _PooledConn:
+    """Adapter para manter compatibilidade com o padrão atual conn.close()."""
+
+    def __init__(self, pool, conn: psycopg.Connection):
+        self._pool = pool
+        self._conn = conn
+        self._released = False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __enter__(self):
+        return self._conn.__enter__()
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._conn.__exit__(exc_type, exc, tb)
+
+    def close(self):
+        if self._released:
+            return
+        self._released = True
+        try:
+            if self._conn.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
+                self._conn.rollback()
+        except Exception:
+            pass
+        self._pool.putconn(self._conn)
+
 
 def require_env_db():
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL não configurada (Render Environment)")
 
 
+def _pool_min() -> int:
+    try:
+        return max(1, int(os.getenv("DB_POOL_MIN", "1")))
+    except Exception:
+        return 1
+
+
+def _pool_max() -> int:
+    try:
+        return max(_pool_min(), int(os.getenv("DB_POOL_MAX", "10")))
+    except Exception:
+        return max(_pool_min(), 10)
+
+
+def _pool_timeout() -> float:
+    try:
+        return max(1.0, float(os.getenv("DB_POOL_TIMEOUT", "5")))
+    except Exception:
+        return 5.0
+
+
+def _conn_timeout() -> int:
+    try:
+        return max(1, int(os.getenv("DB_CONN_TIMEOUT", "5")))
+    except Exception:
+        return 5
+
+
+def _statement_timeout_ms() -> int:
+    try:
+        return max(0, int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "0")))
+    except Exception:
+        return 0
+
+
+def _pool_kwargs() -> dict:
+    kwargs = {
+        "autocommit": False,
+        "row_factory": dict_row,
+        "connect_timeout": _conn_timeout(),
+    }
+    stmt_ms = _statement_timeout_ms()
+    if stmt_ms > 0:
+        kwargs["options"] = f"-c statement_timeout={stmt_ms}"
+    return kwargs
+
+
+def _get_pool():
+    global _POOL
+    if _POOL is not None:
+        return _POOL
+    if ConnectionPool is None:
+        return None
+
+    require_env_db()
+    _POOL = ConnectionPool(
+        conninfo=settings.DATABASE_URL,
+        min_size=_pool_min(),
+        max_size=_pool_max(),
+        timeout=_pool_timeout(),
+        kwargs=_pool_kwargs(),
+        open=True,
+    )
+    return _POOL
+
+
+def close_db_pool():
+    global _POOL
+    if _POOL is None:
+        return
+    try:
+        _POOL.close()
+    finally:
+        _POOL = None
+
+
+atexit.register(close_db_pool)
+
+
 def db():
     require_env_db()
-    return psycopg.connect(settings.DATABASE_URL, row_factory=dict_row)
+    pool = _get_pool()
+    if pool is None:
+        return psycopg.connect(settings.DATABASE_URL, **_pool_kwargs())
+    conn = pool.getconn()
+    return _PooledConn(pool, conn)
 
 
 def get_active_leads_query(alias: str | None = None) -> str:

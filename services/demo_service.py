@@ -1,3 +1,4 @@
+import hmac
 from typing import Dict, Tuple
 
 from flask import request
@@ -39,6 +40,31 @@ def require_demo_key() -> Tuple[bool, str | None]:
 def check_demo_key() -> bool:
     ok, _ = require_demo_key()
     return ok
+
+
+def require_admin_key() -> Tuple[bool, str | None]:
+    expected = (settings.ADMIN_KEY or "").strip()
+
+    got = get_header("X-ADMIN-KEY")
+    if not got:
+        auth = get_header("Authorization")
+        if auth.lower().startswith("bearer "):
+            got = auth.split(" ", 1)[1].strip()
+
+    if expected and got and hmac.compare_digest(got, expected):
+        return True, None
+
+    # Compatibilidade temporária: permite DEMO_KEY para admin apenas com flag explícita.
+    if settings.ADMIN_ALLOW_DEMO_KEY:
+        ok_demo, _ = require_demo_key()
+        if ok_demo:
+            return True, None
+
+    if not expected:
+        return False, "ADMIN_KEY não configurada"
+    if not got:
+        return False, "ADMIN_KEY ausente"
+    return False, "ADMIN_KEY inválida"
 
 
 def demo_rate_limited(key: str) -> bool:
