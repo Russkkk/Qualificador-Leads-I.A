@@ -20,7 +20,7 @@ from extensions import limiter, login_manager
 from services.logging_config import configure_logging, init_sentry
 from services import settings
 from services.auth_service import load_user
-from services.utils import json_err, log_exception
+from services.utils import json_err, log_exception, client_ip
 
 
 app = Flask(__name__)
@@ -92,7 +92,11 @@ def access_log_and_request_id(response):
                 "http_request",
                 status=int(getattr(response, "status_code", 0) or 0),
                 duration_ms=dur,
-                remote_addr=(request.headers.get("X-Forwarded-For") or request.remote_addr or "")[:100],
+                # client_ip() usa TRUST_PROXY e pega o primeiro IP do X-Forwarded-For (origem)
+                # sem depender de ProxyFix. Mantemos também a cadeia bruta para debug.
+                client_ip=client_ip()[:100],
+                x_forwarded_for=(request.headers.get("X-Forwarded-For") or "")[:200],
+                remote_addr=(request.remote_addr or "")[:100],
                 user_agent=(request.headers.get("User-Agent") or "")[:200],
             )
     except Exception:
