@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 import sentry_sdk
 
@@ -12,6 +12,25 @@ from services.utils import iso, json_ok, now_utc
 from services.lead_service import lead_temperature
 
 core_bp = Blueprint("core", __name__)
+
+
+@core_bp.get("/favicon.ico")
+@limiter.limit("300 per minute")
+def favicon_ico():
+    """Evita 404 de /favicon.ico quando alguém abre o backend no navegador.
+
+    Safe: serve um ícone estático local.
+    """
+
+    base = Path(__file__).resolve().parent.parent
+    ico = base / "static_site" / "assets" / "favicon.ico"
+    if ico.exists():
+        return send_file(str(ico), mimetype="image/x-icon")
+    # Fallback para SVG, se o .ico não existir.
+    svg = base / "static_site" / "assets" / "favicon.svg"
+    if svg.exists():
+        return send_file(str(svg), mimetype="image/svg+xml")
+    return ("", 204)
 
 
 @core_bp.get("/")
