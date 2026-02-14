@@ -10,7 +10,7 @@
     <meta property="og:image" content="assets/og-image.svg">
     <meta property="og:url" content="https://leadrank.com.br/">
     <meta name="theme-color" content="#2563EB">
-    <meta name="backend-url" content="https://qualificador-leads-ia.onrender.com">
+    <meta name="backend-url" content="/">
     <link rel="icon" href="assets/favicon.svg">
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="assets/tailwind.css" />
@@ -78,7 +78,7 @@
     <script type="module" src="partials/site-shell.js"></script>
     <script>
       const backendMeta = document.querySelector('meta[name="backend-url"]');
-      const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+      const BACKEND = (window.BACKEND_URL || backendMeta?.content || window.location.origin || "").replace(/\/$/, "");
       const loginForm = document.getElementById("loginForm");
       const loginError = document.getElementById("loginError");
 

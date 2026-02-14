@@ -17,7 +17,8 @@ const loadPartial = async (selector, partialPath) => {
 
 // --- Back-end base URL (para flags públicas, captcha e report de erro do front) ---
 const backendMeta = document.querySelector('meta[name="backend-url"]');
-const BACKEND = (window.BACKEND_URL || backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+// Deploy-safe: prioriza override explícito (window/meta) e, no fallback, usa o host atual.
+const BACKEND = (window.BACKEND_URL || backendMeta?.content || window.location.origin || "").replace(/\/$/, "");
 
 const fetchWithTimeout = async (url, options = {}, timeoutMs = 2500) => {
   const controller = new AbortController();
@@ -400,7 +401,7 @@ const trackLeadConversion = ({ email = "", clientId = "", source = "landing_form
   const attr = getAttribution();
   const payload = {
     event: "Lead",
-    lead_email: String(email).trim().toLowerCase(),
+    // LGPD/políticas de mídia: não enviar PII (email) em texto puro para tags.
     client_id: String(clientId).trim(),
     source,
     ...ATTR_FIELDS.reduce((acc, field) => {

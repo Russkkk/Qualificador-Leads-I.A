@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Demo - LeadRank</title>
     <meta name="description" content="Veja uma demonstração do LeadRank sem criar conta." />
-    <meta name="backend-url" content="https://qualificador-leads-ia.onrender.com" />
+    <meta name="backend-url" content="/" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%234F46E5'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' font-size='32' font-family='Arial' fill='white'%3ELR%3C/text%3E%3C/svg%3E"
@@ -64,7 +64,7 @@
     <script>
       (function () {
         const backendMeta = document.querySelector('meta[name="backend-url"]');
-        const BACKEND = (window.BACKEND_URL || backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+        const BACKEND = (window.BACKEND_URL || backendMeta?.content || window.location.origin || "").replace(/\/$/, "");
 
         const tbody = document.getElementById("demoTbody");
         const loading = document.getElementById("demoLoading");

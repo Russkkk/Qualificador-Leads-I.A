@@ -51,7 +51,7 @@ if settings.TRUST_PROXY:
         # Fallback silencioso (não deve quebrar startup).
         pass
 
-CORS(app, resources={r"/*": {"origins": settings.ALLOWED_ORIGINS}})
+CORS(app, resources={r"/*": {"origins": settings.ALLOWED_ORIGINS, "supports_credentials": False}})
 configure_logging()
 init_sentry()
 
@@ -146,7 +146,7 @@ def handle_exception(err: Exception):
 
 def _is_allowed_origin(origin: str) -> bool:
     for entry in settings.ALLOWED_ORIGINS:
-        if entry == "null":
+        if entry in {"null", "*"}:
             continue
         if entry.startswith("^"):
             if re.match(entry, origin):
@@ -187,4 +187,3 @@ app.register_blueprint(leads_bp)
 app.register_blueprint(ml_bp)
 app.register_blueprint(billing_bp)
 app.register_blueprint(admin_bp)
-

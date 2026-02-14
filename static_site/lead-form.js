@@ -1,8 +1,11 @@
 const leadForm = document.getElementById("leadForm");
 const formStatus = document.getElementById("formStatus");
 const backendMeta = document.querySelector('meta[name="backend-url"]');
-const BACKEND = (backendMeta?.content || "https://qualificador-leads-ia.onrender.com").replace(/\/$/, "");
+// Evita hardcode de ambiente: usa meta quando definida, senão o host atual.
+const BACKEND = (window.BACKEND_URL || backendMeta?.content || window.location.origin || "").replace(/\/$/, "");
 const THANK_YOU_URL = "obrigado.html";
+const OFFLINE_META_KEY = "leadrank_lead_offline_meta";
+const STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const normalizePhone = (raw) => String(raw || "").replace(/\D+/g, "");
 
@@ -51,29 +54,74 @@ const generatePassword = () => {
   return result;
 };
 
-const saveLeadLocally = (payload) => {
-  const stored = localStorage.getItem("leadrank_leads");
-  const leads = stored ? JSON.parse(stored) : [];
-  leads.push({
-    ...payload,
-    createdAt: new Date().toISOString(),
-  });
-  localStorage.setItem("leadrank_leads", JSON.stringify(leads));
+const safeStorageGet = (key) => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (_) {
+    return null;
+  }
 };
 
-const serializeForm = (form) => {
-  const data = {};
-  new FormData(form).forEach((value, key) => {
-    data[key] = value;
-  });
-  return data;
+const safeStorageSet = (key, value) => {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch (_) {
+    return false;
+  }
 };
+
+const safeStorageRemove = (key) => {
+  try {
+    window.localStorage.removeItem(key);
+  } catch (_) {}
+};
+
+const readJson = (raw) => {
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const cleanupSensitiveLocalData = () => {
+  // Remove legado com PII armazenada em texto puro.
+  safeStorageRemove("leadrank_leads");
+  safeStorageRemove("leadrank_last_lead_email");
+
+  // Remove pending antigo que possua email.
+  const pending = readJson(safeStorageGet("leadrank_lead_pending"));
+  if (pending && typeof pending === "object" && String(pending.email || "").trim()) {
+    safeStorageRemove("leadrank_lead_pending");
+  }
+
+  // TTL para metadado offline sem PII.
+  const meta = readJson(safeStorageGet(OFFLINE_META_KEY));
+  const expiresAt = Number(meta?.expires_at || 0);
+  if (!meta || !expiresAt || Date.now() > expiresAt) {
+    safeStorageRemove(OFFLINE_META_KEY);
+  }
+};
+
+const saveOfflineAttemptMeta = ({ clientId = "" } = {}) => {
+  const now = Date.now();
+  const payload = {
+    source: "landing_form",
+    client_id: String(clientId || "").trim(),
+    created_at: new Date(now).toISOString(),
+    expires_at: now + STORAGE_TTL_MS,
+  };
+  safeStorageSet(OFFLINE_META_KEY, JSON.stringify(payload));
+};
+
+cleanupSensitiveLocalData();
 
 // A conversão (Lead) é disparada apenas na página de Obrigado (um único lugar),
 // via site-shell.js. Aqui só gravamos um payload "pending" e redirecionamos.
 const setPendingLeadConversion = ({ email = "", clientId = "" } = {}) => {
   const payload = {
-    email: String(email).trim().toLowerCase(),
+    // Sem PII em storage persistente: mantemos só metadados não sensíveis.
     client_id: String(clientId).trim(),
     source: "landing_form",
     submitted_at: new Date().toISOString(),
@@ -84,9 +132,7 @@ const setPendingLeadConversion = ({ email = "", clientId = "" } = {}) => {
     return;
   }
 
-  try {
-    localStorage.setItem("leadrank_lead_pending", JSON.stringify(payload));
-  } catch (_) {}
+  safeStorageSet("leadrank_lead_pending", JSON.stringify(payload));
 };
 
 const showThankYouState = (tempPassword) => {
@@ -169,8 +215,8 @@ if (leadForm) {
       // Mantemos apenas na sessão para exibir na página de Obrigado.
       storageSetSession("leadrank_temp_password", tempPassword);
 
-      // Para mostrar dados na página de Obrigado.
-      localStorage.setItem("leadrank_last_lead_email", String(payload.email || "").trim());
+      // Segurança/LGPD: evita persistir email em storage do navegador.
+      safeStorageRemove("leadrank_last_lead_email");
 
       setPendingLeadConversion({ email: payload.email || "", clientId });
 
@@ -185,9 +231,9 @@ if (leadForm) {
         showThankYouState(tempPassword);
       }
     } catch (error) {
-      saveLeadLocally(serializeForm(leadForm));
+      saveOfflineAttemptMeta();
       showStatus(
-        "Falha de conexão. Salvamos o lead localmente para não perder o contato.",
+        "Falha de conexão. Registramos apenas uma tentativa local sem dados pessoais.",
         "warning"
       );
     } finally {
